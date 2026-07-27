@@ -1,0 +1,303 @@
+{
+  "genders": [
+    {
+      "id": "male",
+      "label": "남자",
+      "environments": [
+        {
+          "id": "01_헬스장",
+          "label": "헬스장",
+          "scenes": [
+            {
+              "id": "MDFf64Ko7J6QXDAxX-2XrOyKpOyepVwwMV_qsbDsmrjshYDtlLxcMDFf7ISc7ISc",
+              "label": "거울셀피 · 서서",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_01.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_02.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_03.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_04.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_05.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_06.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAxX-2XrOyKpOyepVwwMV_qsbDsmrjshYDtlLxcMDJf7JWJ7JWE7ISc",
+              "label": "거울셀피 · 앉아서",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/02_%EC%95%89%EC%95%84%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_02_%EC%95%89%EC%95%84%EC%84%9C_01.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/02_%EC%95%89%EC%95%84%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_02_%EC%95%89%EC%95%84%EC%84%9C_02.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/02_%EC%95%89%EC%95%84%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_02_%EC%95%89%EC%95%84%EC%84%9C_03.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/02_%EC%95%89%EC%95%84%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_02_%EC%95%89%EC%95%84%EC%84%9C_04.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/02_%EC%95%89%EC%95%84%EC%84%9C/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_02_%EC%95%89%EC%95%84%EC%84%9C_05.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAxX-2XrOyKpOyepVwwMV_qsbDsmrjshYDtlLxcMDNf7ZuE66m0",
+              "label": "거울셀피 · 후면",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/03_%ED%9B%84%EB%A9%B4/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_03_%ED%9B%84%EB%A9%B4_01.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAxX-2XrOyKpOyepVwwM1_smrTrj5nsl7DstpxcMDFf7Jq064-Z7KSR",
+              "label": "운동연출 · 운동중",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C/01_%EC%9A%B4%EB%8F%99%EC%A4%91/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C_01_%EC%9A%B4%EB%8F%99%EC%A4%91_01.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C/01_%EC%9A%B4%EB%8F%99%EC%A4%91/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C_01_%EC%9A%B4%EB%8F%99%EC%A4%91_02.png"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAxX-2XrOyKpOyepVwwM1_smrTrj5nsl7DstpxcMDJf7Jq064-Z7KCEX-ykgOu5hA",
+              "label": "운동연출 · 운동전 준비",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C/02_%EC%9A%B4%EB%8F%99%EC%A0%84_%EC%A4%80%EB%B9%84/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C_02_%EC%9A%B4%EB%8F%99%EC%A0%84_%EC%A4%80%EB%B9%84_01.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C/02_%EC%9A%B4%EB%8F%99%EC%A0%84_%EC%A4%80%EB%B9%84/%EB%82%A8%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C_02_%EC%9A%B4%EB%8F%99%EC%A0%84_%EC%A4%80%EB%B9%84_02.jpg"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "02_야외",
+          "label": "야외",
+          "scenes": [
+            {
+              "id": "MDFf64Ko7J6QXDAyX-yVvOyZuFwwMV_snpDsl7Bf7Yq466CI7J28XDAzX-yatOuPmeyghO2bhF_soJXsp4A",
+              "label": "자연 트레일 · 운동전후 정지",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/02_%EC%95%BC%EC%99%B8/01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC/03_%EC%9A%B4%EB%8F%99%EC%A0%84%ED%9B%84_%EC%A0%95%EC%A7%80/%EB%82%A8%EC%9E%90_%EC%95%BC%EC%99%B8_01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC_03_%EC%9A%B4%EB%8F%99%EC%A0%84%ED%9B%84_%EC%A0%95%EC%A7%80_01.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAyX-yVvOyZuFwwMl_rj4Tsi6xf6rG07LaVXDAxX-qxt-q4sF_snbTrj5k",
+              "label": "도심 건축 · 걷기 이동",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/02_%EC%95%BC%EC%99%B8/02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95/01_%EA%B1%B7%EA%B8%B0_%EC%9D%B4%EB%8F%99/%EB%82%A8%EC%9E%90_%EC%95%BC%EC%99%B8_02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95_01_%EA%B1%B7%EA%B8%B0_%EC%9D%B4%EB%8F%99_01.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAyX-yVvOyZuFwwMl_rj4Tsi6xf6rG07LaVXDAyX-yEnOyEnF_soJXsp4A",
+              "label": "도심 건축 · 서서 정지",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/02_%EC%95%BC%EC%99%B8/02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95/02_%EC%84%9C%EC%84%9C_%EC%A0%95%EC%A7%80/%EB%82%A8%EC%9E%90_%EC%95%BC%EC%99%B8_02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95_02_%EC%84%9C%EC%84%9C_%EC%A0%95%EC%A7%80_01.jpg",
+                "/references/01_%EB%82%A8%EC%9E%90/02_%EC%95%BC%EC%99%B8/02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95/02_%EC%84%9C%EC%84%9C_%EC%A0%95%EC%A7%80/%EB%82%A8%EC%9E%90_%EC%95%BC%EC%99%B8_02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95_02_%EC%84%9C%EC%84%9C_%EC%A0%95%EC%A7%80_02.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAyX-yVvOyZuFwwM1_slbzsmbhf7Zy07IudXDAxX-yVieyVhOyEnA",
+              "label": "야외 휴식 · 앉아서",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/02_%EC%95%BC%EC%99%B8/03_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D/01_%EC%95%89%EC%95%84%EC%84%9C/%EB%82%A8%EC%9E%90_%EC%95%BC%EC%99%B8_03_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D_01_%EC%95%89%EC%95%84%EC%84%9C_02.jpg"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "03_데일리",
+          "label": "데일리",
+          "scenes": [
+            {
+              "id": "MDFf64Ko7J6QXDAzX-uNsOydvOumrFwwMV_qsbDrpqxcMDFf6rG36riwX-ydtOuPmQ",
+              "label": "거리 · 걷기 이동",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/01_%EA%B1%B0%EB%A6%AC/01_%EA%B1%B7%EA%B8%B0_%EC%9D%B4%EB%8F%99/%EB%82%A8%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_01_%EA%B1%B0%EB%A6%AC_01_%EA%B1%B7%EA%B8%B0_%EC%9D%B4%EB%8F%99_01.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAzX-uNsOydvOumrFwwMl_slbzsmbhf7Zy07IudXDAxX-yVieyVhOyEnA",
+              "label": "야외 휴식 · 앉아서",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/02_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D/01_%EC%95%89%EC%95%84%EC%84%9C/%EB%82%A8%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_02_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D_01_%EC%95%89%EC%95%84%EC%84%9C_01.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAzX-uNsOydvOumrFwwMl_slbzsmbhf7Zy07IudXDAyX-yEnOyEnA",
+              "label": "야외 휴식 · 서서",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/02_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D/02_%EC%84%9C%EC%84%9C/%EB%82%A8%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_02_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D_02_%EC%84%9C%EC%84%9C_01.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAzX-uNsOydvOumrFwwM1_si6TrgrRf6rO17Jqp6rO16rCEXDAxX-yEnOyEnF_siqTrg4U",
+              "label": "실내 공용공간 · 서서 스냅",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84/01_%EC%84%9C%EC%84%9C_%EC%8A%A4%EB%83%85/%EB%82%A8%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84_01_%EC%84%9C%EC%84%9C_%EC%8A%A4%EB%83%85_01.png"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAzX-uNsOydvOumrFwwM1_si6TrgrRf6rO17Jqp6rO16rCEXDAyX-yXmOumrOuyoOydtO2EsF_soJXsp4A",
+              "label": "실내 공용공간 · 엘리베이터 정지",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84/02_%EC%97%98%EB%A6%AC%EB%B2%A0%EC%9D%B4%ED%84%B0_%EC%A0%95%EC%A7%80/%EB%82%A8%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84_02_%EC%97%98%EB%A6%AC%EB%B2%A0%EC%9D%B4%ED%84%B0_%EC%A0%95%EC%A7%80_01.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAzX-uNsOydvOumrFwwM1_si6TrgrRf6rO17Jqp6rO16rCEXDAzX-y5tO2OmF_so7zrrLhf64yA6riw",
+              "label": "실내 공용공간 · 카페 주문 대기",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84/03_%EC%B9%B4%ED%8E%98_%EC%A3%BC%EB%AC%B8_%EB%8C%80%EA%B8%B0/%EB%82%A8%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84_03_%EC%B9%B4%ED%8E%98_%EC%A3%BC%EB%AC%B8_%EB%8C%80%EA%B8%B0_01.jpg"
+              ]
+            },
+            {
+              "id": "MDFf64Ko7J6QXDAzX-uNsOydvOumrFwwNF_sp5Ff7IOd7Zmc6rO16rCEXDAxX-qxsOyauOyFgO2UvA",
+              "label": "집 생활공간 · 거울셀피",
+              "images": [
+                "/references/01_%EB%82%A8%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/04_%EC%A7%91_%EC%83%9D%ED%99%9C%EA%B3%B5%EA%B0%84/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/%EB%82%A8%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_04_%EC%A7%91_%EC%83%9D%ED%99%9C%EA%B3%B5%EA%B0%84_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01.jpg"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "female",
+      "label": "여자",
+      "environments": [
+        {
+          "id": "01_헬스장",
+          "label": "헬스장",
+          "scenes": [
+            {
+              "id": "MDJf7Jes7J6QXDAxX-2XrOyKpOyepVwwMV_qsbDsmrjshYDtlLxcMDFf7ISc7ISc",
+              "label": "거울셀피 · 서서",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_07.png",
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_08.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_09.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_10.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_11.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/01_%EC%84%9C%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01_%EC%84%9C%EC%84%9C_12.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAxX-2XrOyKpOyepVwwMV_qsbDsmrjshYDtlLxcMDJf7JWJ7JWE7ISc",
+              "label": "거울셀피 · 앉아서",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/02_%EC%95%89%EC%95%84%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_02_%EC%95%89%EC%95%84%EC%84%9C_06.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAxX-2XrOyKpOyepVwwMl_tlYTrnbzthYzsiqRcMDFf7ISc7ISc",
+              "label": "필라테스 · 서서",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4/01_%EC%84%9C%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4_01_%EC%84%9C%EC%84%9C_01.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4/01_%EC%84%9C%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4_01_%EC%84%9C%EC%84%9C_02.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAxX-2XrOyKpOyepVwwMl_tlYTrnbzthYzsiqRcMDJf7JWJ7JWE7ISc",
+              "label": "필라테스 · 앉아서",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4/02_%EC%95%89%EC%95%84%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4_02_%EC%95%89%EC%95%84%EC%84%9C_01.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4/02_%EC%95%89%EC%95%84%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4_02_%EC%95%89%EC%95%84%EC%84%9C_02.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4/02_%EC%95%89%EC%95%84%EC%84%9C/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_02_%ED%95%84%EB%9D%BC%ED%85%8C%EC%8A%A4_02_%EC%95%89%EC%95%84%EC%84%9C_03.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAxX-2XrOyKpOyepVwwM1_smrTrj5nsl7DstpxcMDNf7Jq064-Z7ZuEX-2ctOyLnV_snbTrj5k",
+              "label": "운동연출 · 운동후 휴식 이동",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C/03_%EC%9A%B4%EB%8F%99%ED%9B%84_%ED%9C%B4%EC%8B%9D_%EC%9D%B4%EB%8F%99/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C_03_%EC%9A%B4%EB%8F%99%ED%9B%84_%ED%9C%B4%EC%8B%9D_%EC%9D%B4%EB%8F%99_01.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/01_%ED%97%AC%EC%8A%A4%EC%9E%A5/03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C/03_%EC%9A%B4%EB%8F%99%ED%9B%84_%ED%9C%B4%EC%8B%9D_%EC%9D%B4%EB%8F%99/%EC%97%AC%EC%9E%90_%ED%97%AC%EC%8A%A4%EC%9E%A5_03_%EC%9A%B4%EB%8F%99%EC%97%B0%EC%B6%9C_03_%EC%9A%B4%EB%8F%99%ED%9B%84_%ED%9C%B4%EC%8B%9D_%EC%9D%B4%EB%8F%99_02.jpg"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "02_야외",
+          "label": "야외",
+          "scenes": [
+            {
+              "id": "MDJf7Jes7J6QXDAyX-yVvOyZuFwwMV_snpDsl7Bf7Yq466CI7J28XDAxX-yEnOyEnF_tko3qsr3qsJDsg4E",
+              "label": "자연 트레일 · 서서 풍경감상",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/02_%EC%95%BC%EC%99%B8/01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC/01_%EC%84%9C%EC%84%9C_%ED%92%8D%EA%B2%BD%EA%B0%90%EC%83%81/%EC%97%AC%EC%9E%90_%EC%95%BC%EC%99%B8_01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC_01_%EC%84%9C%EC%84%9C_%ED%92%8D%EA%B2%BD%EA%B0%90%EC%83%81_01.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/02_%EC%95%BC%EC%99%B8/01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC/01_%EC%84%9C%EC%84%9C_%ED%92%8D%EA%B2%BD%EA%B0%90%EC%83%81/%EC%97%AC%EC%9E%90_%EC%95%BC%EC%99%B8_01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC_01_%EC%84%9C%EC%84%9C_%ED%92%8D%EA%B2%BD%EA%B0%90%EC%83%81_02.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAyX-yVvOyZuFwwMV_snpDsl7Bf7Yq466CI7J28XDAyX-uLrOumrOq4sF_snbTrj5k",
+              "label": "자연 트레일 · 달리기 이동",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/02_%EC%95%BC%EC%99%B8/01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC/02_%EB%8B%AC%EB%A6%AC%EA%B8%B0_%EC%9D%B4%EB%8F%99/%EC%97%AC%EC%9E%90_%EC%95%BC%EC%99%B8_01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC_02_%EB%8B%AC%EB%A6%AC%EA%B8%B0_%EC%9D%B4%EB%8F%99_01.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAyX-yVvOyZuFwwMV_snpDsl7Bf7Yq466CI7J28XDAzX-yatOuPmeyghO2bhF_soJXsp4A",
+              "label": "자연 트레일 · 운동전후 정지",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/02_%EC%95%BC%EC%99%B8/01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC/03_%EC%9A%B4%EB%8F%99%EC%A0%84%ED%9B%84_%EC%A0%95%EC%A7%80/%EC%97%AC%EC%9E%90_%EC%95%BC%EC%99%B8_01_%EC%9E%90%EC%97%B0_%ED%8A%B8%EB%A0%88%EC%9D%BC_03_%EC%9A%B4%EB%8F%99%EC%A0%84%ED%9B%84_%EC%A0%95%EC%A7%80_02.png"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAyX-yVvOyZuFwwMl_rj4Tsi6xf6rG07LaVXDAyX-yEnOyEnF_soJXsp4A",
+              "label": "도심 건축 · 서서 정지",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/02_%EC%95%BC%EC%99%B8/02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95/02_%EC%84%9C%EC%84%9C_%EC%A0%95%EC%A7%80/%EC%97%AC%EC%9E%90_%EC%95%BC%EC%99%B8_02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95_02_%EC%84%9C%EC%84%9C_%EC%A0%95%EC%A7%80_03.png"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAyX-yVvOyZuFwwMl_rj4Tsi6xf6rG07LaVXDAzX-qzhOuLqF_quLDrjIDquLA",
+              "label": "도심 건축 · 계단 기대기",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/02_%EC%95%BC%EC%99%B8/02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95/03_%EA%B3%84%EB%8B%A8_%EA%B8%B0%EB%8C%80%EA%B8%B0/%EC%97%AC%EC%9E%90_%EC%95%BC%EC%99%B8_02_%EB%8F%84%EC%8B%AC_%EA%B1%B4%EC%B6%95_03_%EA%B3%84%EB%8B%A8_%EA%B8%B0%EB%8C%80%EA%B8%B0_01.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAyX-yVvOyZuFwwM1_slbzsmbhf7Zy07IudXDAxX-yVieyVhOyEnA",
+              "label": "야외 휴식 · 앉아서",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/02_%EC%95%BC%EC%99%B8/03_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D/01_%EC%95%89%EC%95%84%EC%84%9C/%EC%97%AC%EC%9E%90_%EC%95%BC%EC%99%B8_03_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D_01_%EC%95%89%EC%95%84%EC%84%9C_01.jpg"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "03_데일리",
+          "label": "데일리",
+          "scenes": [
+            {
+              "id": "MDJf7Jes7J6QXDAzX-uNsOydvOumrFwwMV_qsbDrpqxcMDJf7ISc7IScX-yKpOuDhQ",
+              "label": "거리 · 서서 스냅",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/01_%EA%B1%B0%EB%A6%AC/02_%EC%84%9C%EC%84%9C_%EC%8A%A4%EB%83%85/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_01_%EA%B1%B0%EB%A6%AC_02_%EC%84%9C%EC%84%9C_%EC%8A%A4%EB%83%85_01.png",
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/01_%EA%B1%B0%EB%A6%AC/02_%EC%84%9C%EC%84%9C_%EC%8A%A4%EB%83%85/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_01_%EA%B1%B0%EB%A6%AC_02_%EC%84%9C%EC%84%9C_%EC%8A%A4%EB%83%85_02.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAzX-uNsOydvOumrFwwMl_slbzsmbhf7Zy07IudXDAyX-yEnOyEnA",
+              "label": "야외 휴식 · 서서",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/02_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D/02_%EC%84%9C%EC%84%9C/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_02_%EC%95%BC%EC%99%B8_%ED%9C%B4%EC%8B%9D_02_%EC%84%9C%EC%84%9C_02.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAzX-uNsOydvOumrFwwM1_si6TrgrRf6rO17Jqp6rO16rCEXDA0X-qxsOyauOyFgO2UvA",
+              "label": "실내 공용공간 · 거울셀피",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84/04_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84_04_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_01.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84/04_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84_04_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_02.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84/04_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_03_%EC%8B%A4%EB%82%B4_%EA%B3%B5%EC%9A%A9%EA%B3%B5%EA%B0%84_04_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_03.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAzX-uNsOydvOumrFwwNF_sp5Ff7IOd7Zmc6rO16rCEXDAxX-qxsOyauOyFgO2UvA",
+              "label": "집 생활공간 · 거울셀피",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/04_%EC%A7%91_%EC%83%9D%ED%99%9C%EA%B3%B5%EA%B0%84/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_04_%EC%A7%91_%EC%83%9D%ED%99%9C%EA%B3%B5%EA%B0%84_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_02.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/04_%EC%A7%91_%EC%83%9D%ED%99%9C%EA%B3%B5%EA%B0%84/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_04_%EC%A7%91_%EC%83%9D%ED%99%9C%EA%B3%B5%EA%B0%84_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_03.jpg",
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/04_%EC%A7%91_%EC%83%9D%ED%99%9C%EA%B3%B5%EA%B0%84/01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_04_%EC%A7%91_%EC%83%9D%ED%99%9C%EA%B3%B5%EA%B0%84_01_%EA%B1%B0%EC%9A%B8%EC%85%80%ED%94%BC_04.jpg"
+              ]
+            },
+            {
+              "id": "MDJf7Jes7J6QXDAzX-uNsOydvOumrFwwNV_smrTrj5nqs7XqsIRf7Zmc7JqpXDAxX-yatOuPme2bhF_snbjspp0",
+              "label": "운동공간 활용 · 운동후 인증",
+              "images": [
+                "/references/02_%EC%97%AC%EC%9E%90/03_%EB%8D%B0%EC%9D%BC%EB%A6%AC/05_%EC%9A%B4%EB%8F%99%EA%B3%B5%EA%B0%84_%ED%99%9C%EC%9A%A9/01_%EC%9A%B4%EB%8F%99%ED%9B%84_%EC%9D%B8%EC%A6%9D/%EC%97%AC%EC%9E%90_%EB%8D%B0%EC%9D%BC%EB%A6%AC_05_%EC%9A%B4%EB%8F%99%EA%B3%B5%EA%B0%84_%ED%99%9C%EC%9A%A9_01_%EC%9A%B4%EB%8F%99%ED%9B%84_%EC%9D%B8%EC%A6%9D_01.jpg"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
