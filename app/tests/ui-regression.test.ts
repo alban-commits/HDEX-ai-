@@ -6,9 +6,15 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function normalizeLineEndings(value: string): string {
+  return value.replace(/\r\n?/g, "\n");
+}
+
 describe("existing product UI regression boundary", () => {
   test("keeps the preset layout, copy, controls, tabs, and prompts byte-identical", async () => {
-    const source = await readFile(new URL("../src/layouts/preset.tsx", import.meta.url), "utf8");
+    const source = normalizeLineEndings(
+      await readFile(new URL("../src/layouts/preset.tsx", import.meta.url), "utf8"),
+    );
     const withoutAllowedConnectionHooks = source
       .replace(
         /import \{\n {2}GUEST_SCOPE_KEY,[\s\S]*? {2}uploadAsset,\n\} from "@\/lib\/fnf\.browser";/,
@@ -31,9 +37,11 @@ describe("existing product UI regression boundary", () => {
   });
 
   test("keeps the existing SignInModal DOM, copy, and styling unchanged", async () => {
-    const source = await readFile(
-      new URL("../src/components/sign-in-modal/sign-in-modal.tsx", import.meta.url),
-      "utf8",
+    const source = normalizeLineEndings(
+      await readFile(
+        new URL("../src/components/sign-in-modal/sign-in-modal.tsx", import.meta.url),
+        "utf8",
+      ),
     );
     expect(sha256(source)).toBe("57af5005afaae0f46b9793034f7d7263c2a14b3ec882df8464eb5217ced2fd3a");
   });
