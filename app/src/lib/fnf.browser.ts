@@ -1,52 +1,81 @@
-import { createProfileClient, type FnfAdapter } from "@higgsfield/fnf";
+import type { FnfAdapter } from "@higgsfield/fnf";
 import type { MediaRef } from "@higgsfield/fnf/media";
 import { errorFromJSON } from "@higgsfield/fnf/errors";
 import { gptImage2, soulV2Image } from "@higgsfield/fnf/jobs";
 import type { AssetSelection } from "@/components/asset-library";
-import {
-  cancelJobFn,
-  createJobsFn,
-  estimateCostFn,
-  getCurrentWorkspaceFn,
-  getJobFn,
-  getJobSetFn,
-  getMediaFn,
-  getUserFn,
-  getWorkspaceWalletFn,
-  listJobsFn,
-  listMediaFn,
-  listWorkspacesFn,
-  switchWorkspaceFn,
-} from "./fnf.functions";
-import type { FnfRpcResult } from "./fnf.functions";
-import { requestGenerationApproval } from "./generation-approval";
 
 export const PRESET_JOBS = [soulV2Image, gptImage2] as const;
 
-async function unwrap(result: FnfRpcResult): Promise<unknown> {
-  if (!result.ok) throw errorFromJSON(result.error);
+type AdapterResponse =
+  | { ok: true; value: unknown }
+  | { ok: false; error: { code: string; message: string; status?: number; data?: unknown } };
+
+type ReconnectListener = () => void;
+const reconnectListeners = new Set<ReconnectListener>();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requiresReconnect(error: { code: string; data?: unknown }): boolean {
+  return (
+    error.code === "oauth_required" ||
+    (isRecord(error.data) && error.data.reconnectRequired === true)
+  );
+}
+
+function throwAdapterError(error: {
+  code: string;
+  message: string;
+  status?: number;
+  data?: unknown;
+}): never {
+  if (requiresReconnect(error)) {
+    notifyHiggsfieldReconnectRequired();
+  }
+  throw errorFromJSON(error);
+}
+
+export function subscribeHiggsfieldReconnect(listener: ReconnectListener): () => void {
+  reconnectListeners.add(listener);
+  return () => reconnectListeners.delete(listener);
+}
+
+export function notifyHiggsfieldReconnectRequired(): void {
+  for (const listener of reconnectListeners) listener();
+}
+
+async function adapterCall(operation: string, data: object = {}): Promise<unknown> {
+  const response = await fetch("/api/higgsfield/adapter", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation, data }),
+  });
+  const result = (await response.json()) as AdapterResponse;
+  if (!result.ok) throwAdapterError(result.error);
   return result.value;
 }
 
-/** Browser-safe adapter: every backend operation crosses a TanStack server function. */
+/** Browser-safe adapter: every provider operation crosses the same-origin Node route. */
 export const fnfBrowserAdapter: FnfAdapter = {
-  confirm: requestGenerationApproval,
-  createJobs: (data) => createJobsFn({ data }).then(unwrap),
-  getJob: (id) => getJobFn({ data: { id } }).then(unwrap),
-  getJobSet: (id) => getJobSetFn({ data: { id } }).then(unwrap),
-  listJobs: (data) => listJobsFn({ data }).then(unwrap),
-  estimateCost: (data) => estimateCostFn({ data }).then(unwrap),
-  cancelJob: (id) => cancelJobFn({ data: { id } }).then(unwrap),
-  getMedia: (data) => getMediaFn({ data }).then(unwrap),
-  listMedia: (data) => listMediaFn({ data }).then(unwrap),
-  getUser: () => getUserFn().then(unwrap),
-  listWorkspaces: () => listWorkspacesFn().then(unwrap),
-  getCurrentWorkspace: () => getCurrentWorkspaceFn().then(unwrap),
-  getWorkspaceWallet: () => getWorkspaceWalletFn().then(unwrap),
-  switchWorkspace: (data) => switchWorkspaceFn({ data }).then(unwrap),
+  // The existing Generate button is the explicit user action. This opaque ID
+  // lets the server atomically deduplicate that exact built request without
+  // adding a second confirmation UI.
+  confirm: () => Promise.resolve(crypto.randomUUID()),
+  createJobs: (data) => adapterCall("createJobs", data),
+  getJob: (id) => adapterCall("getJob", { id }),
+  listJobs: (data) => adapterCall("listJobs", data),
+  estimateCost: (data) => adapterCall("estimateCost", data),
+  getMedia: () =>
+    Promise.reject(errorFromJSON({ code: "not_supported", message: "Not supported" })),
+  listMedia: () => Promise.resolve({ items: [] }),
+  getUser: () => adapterCall("getUser"),
+  listWorkspaces: () => adapterCall("listWorkspaces"),
+  getCurrentWorkspace: () => adapterCall("getCurrentWorkspace"),
+  getWorkspaceWallet: () => adapterCall("getWorkspaceWallet"),
+  switchWorkspace: (data) => adapterCall("switchWorkspace", data),
 };
-
-const profileClient = createProfileClient({ profileAdapter: fnfBrowserAdapter });
 
 type CurrentUser = { id: string; workspaceId?: string | null };
 export const GUEST_SCOPE_KEY = "guest";
@@ -65,32 +94,66 @@ export async function fetchCurrentUser(): Promise<CurrentUser | null> {
 export async function getFnfScopeKey(): Promise<string> {
   const user = await fetchCurrentUser();
   if (user == null) return GUEST_SCOPE_KEY;
-  const workspace = await profileClient.getCurrentWorkspace().catch(() => null);
-  return `${user.id}:${workspace?.id ?? user.workspaceId ?? "personal"}`;
+  return `${user.id}:${user.workspaceId ?? "personal"}`;
 }
 
 export function getSignInUrl(scopeKey: string, returnPath: string): string | null {
   if (scopeKey !== GUEST_SCOPE_KEY) return null;
-  const safeReturnPath = returnPath.startsWith("/") && !returnPath.startsWith("//")
-    ? returnPath
-    : "/";
-  return `/__auth/login?return=${encodeURIComponent(safeReturnPath)}`;
+  const safeReturnPath =
+    returnPath.startsWith("/") && !returnPath.startsWith("//") ? returnPath : "/";
+  return `/api/higgsfield/oauth/connect?return=${encodeURIComponent(safeReturnPath)}`;
+}
+
+export function getReconnectSignInUrl(returnPath: string): string {
+  const safeReturnPath =
+    returnPath.startsWith("/") && !returnPath.startsWith("//") ? returnPath : "/";
+  return `/api/higgsfield/oauth/connect?return=${encodeURIComponent(safeReturnPath)}`;
 }
 
 type UploadResponse =
-  | { ok: true; ref: MediaRef; url: string }
+  | { ok: true; ref: MediaRef }
   | { ok: false; error: { code: string; message: string; status?: number; data?: unknown } };
+
+const MAX_LOCAL_UPLOADS = 8;
+const localUploadFiles = new Map<string, { file: File; objectUrl: string }>();
+
+export function getLocalUploadFile(mediaId: string): File | undefined {
+  return localUploadFiles.get(mediaId)?.file;
+}
+
+export function releaseLocalUpload(mediaId: string): void {
+  const stored = localUploadFiles.get(mediaId);
+  if (!stored) return;
+  localUploadFiles.delete(mediaId);
+  URL.revokeObjectURL(stored.objectUrl);
+}
+
+export function releaseAllLocalUploads(): void {
+  for (const mediaId of [...localUploadFiles.keys()]) releaseLocalUpload(mediaId);
+}
+
+function rememberLocalUpload(mediaId: string, file: File, objectUrl: string): void {
+  releaseLocalUpload(mediaId);
+  localUploadFiles.set(mediaId, { file, objectUrl });
+  while (localUploadFiles.size > MAX_LOCAL_UPLOADS) {
+    const oldest = localUploadFiles.keys().next().value as string | undefined;
+    if (!oldest) break;
+    releaseLocalUpload(oldest);
+  }
+}
 
 export async function uploadAsset(file: File): Promise<AssetSelection> {
   const form = new FormData();
   form.set("file", file);
   const response = await fetch("/api/media/upload", { method: "POST", body: form });
   const body = (await response.json()) as UploadResponse;
-  if (!body.ok) throw errorFromJSON(body.error);
+  if (!body.ok) throwAdapterError(body.error);
+  const objectUrl = URL.createObjectURL(file);
+  rememberLocalUpload(body.ref.id, file, objectUrl);
   return {
     name: file.name,
     type: file.type || body.ref.type,
-    src: body.url,
+    src: objectUrl,
     ref: { ...body.ref, type: "media_input" },
   };
 }

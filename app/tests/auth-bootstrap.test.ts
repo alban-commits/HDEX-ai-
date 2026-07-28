@@ -1,9 +1,15 @@
 import { expect, test } from "bun:test";
 import {
   fetchCurrentUser,
+  fnfBrowserAdapter,
+  getReconnectSignInUrl,
   getFnfScopeKey,
+  getLocalUploadFile,
   getSignInUrl,
   GUEST_SCOPE_KEY,
+  releaseAllLocalUploads,
+  releaseLocalUpload,
+  subscribeHiggsfieldReconnect,
   uploadAsset,
 } from "../src/lib/fnf.browser";
 
@@ -40,11 +46,14 @@ test("opens the public app under a guest scope", async () => {
 
 test("sends only guests through the app auth route", () => {
   expect(getSignInUrl(GUEST_SCOPE_KEY, "/presets?tab=popular")).toBe(
-    "/__auth/login?return=%2Fpresets%3Ftab%3Dpopular",
+    "/api/higgsfield/oauth/connect?return=%2Fpresets%3Ftab%3Dpopular",
   );
   expect(getSignInUrl("user-1:workspace-1", "/presets")).toBeNull();
   expect(getSignInUrl(GUEST_SCOPE_KEY, "//evil.example")).toBe(
-    "/__auth/login?return=%2F",
+    "/api/higgsfield/oauth/connect?return=%2F",
+  );
+  expect(getReconnectSignInUrl("/presets?tab=history")).toBe(
+    "/api/higgsfield/oauth/connect?return=%2Fpresets%3Ftab%3Dhistory",
   );
 });
 
@@ -59,23 +68,78 @@ test("normalizes uploaded image refs before they reach generation input", async 
       ref: {
         id: "97cf1fec-77a9-4627-a3d4-23a09ea8aaa4",
         type: "image",
-        url: "https://cdn.example/upload.png",
       },
-      url: "https://cdn.example/upload.png",
     });
   };
 
   try {
-    const asset = await uploadAsset(new File(["image"], "upload.png", { type: "image/png" }));
+    const file = new File(["image"], "upload.png", { type: "image/png" });
+    const asset = await uploadAsset(file);
     expect(asset).toMatchObject({
-      src: "https://cdn.example/upload.png",
       ref: {
         id: "97cf1fec-77a9-4627-a3d4-23a09ea8aaa4",
         type: "media_input",
-        url: "https://cdn.example/upload.png",
       },
     });
+    expect(asset.src.startsWith("blob:")).toBe(true);
+    expect(getLocalUploadFile(asset.ref!.id)).toBe(file);
   } finally {
+    releaseAllLocalUploads();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("notifies the existing sign-in flow when an adapter response requires OAuth reconnect", async () => {
+  const originalFetch = globalThis.fetch;
+  let notifications = 0;
+  const unsubscribe = subscribeHiggsfieldReconnect(() => {
+    notifications += 1;
+  });
+  globalThis.fetch = async () =>
+    Response.json(
+      {
+        ok: false,
+        error: {
+          code: "oauth_required",
+          message: "Reconnect",
+          data: { reconnectRequired: true },
+        },
+      },
+      { status: 401 },
+    );
+  try {
+    await expect(fnfBrowserAdapter.getUser()).rejects.toMatchObject({ code: "oauth_required" });
+    expect(notifications).toBe(1);
+  } finally {
+    unsubscribe();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("bounds and explicitly releases local upload object URLs", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalRevoke = URL.revokeObjectURL;
+  const revoked: string[] = [];
+  let id = 0;
+  URL.revokeObjectURL = (url) => {
+    revoked.push(url);
+  };
+  globalThis.fetch = async () => {
+    id += 1;
+    return Response.json({ ok: true, ref: { id: `bounded-media-${id}`, type: "image" } });
+  };
+  try {
+    for (let index = 0; index < 9; index += 1) {
+      await uploadAsset(new File([`image-${index}`], `upload-${index}.png`, { type: "image/png" }));
+    }
+    expect(getLocalUploadFile("bounded-media-1")).toBeUndefined();
+    expect(revoked).toHaveLength(1);
+    releaseLocalUpload("bounded-media-9");
+    expect(getLocalUploadFile("bounded-media-9")).toBeUndefined();
+    expect(revoked).toHaveLength(2);
+  } finally {
+    releaseAllLocalUploads();
+    URL.revokeObjectURL = originalRevoke;
     globalThis.fetch = originalFetch;
   }
 });

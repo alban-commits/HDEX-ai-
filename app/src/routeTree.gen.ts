@@ -13,7 +13,16 @@ import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiUserRouteImport } from './routes/api/user'
+import { Route as ApiHealthRouteImport } from './routes/api/health'
+import { Route as ApiOpenaiProfileRouteImport } from './routes/api/openai/profile'
 import { Route as ApiMediaUploadRouteImport } from './routes/api/media/upload'
+import { Route as ApiHiggsfieldAdapterRouteImport } from './routes/api/higgsfield/adapter'
+import { Route as ApiHiggsfieldResultJobIdRouteImport } from './routes/api/higgsfield/result/$jobId'
+import { Route as ApiHiggsfieldOauthStatusRouteImport } from './routes/api/higgsfield/oauth/status'
+import { Route as ApiHiggsfieldOauthDisconnectRouteImport } from './routes/api/higgsfield/oauth/disconnect'
+import { Route as ApiHiggsfieldOauthConnectRouteImport } from './routes/api/higgsfield/oauth/connect'
+import { Route as ApiHiggsfieldOauthCapabilitiesRouteImport } from './routes/api/higgsfield/oauth/capabilities'
+import { Route as ApiHiggsfieldOauthCallbackRouteImport } from './routes/api/higgsfield/oauth/callback'
 
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
@@ -35,55 +44,178 @@ const ApiUserRoute = ApiUserRouteImport.update({
   path: '/api/user',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiOpenaiProfileRoute = ApiOpenaiProfileRouteImport.update({
+  id: '/api/openai/profile',
+  path: '/api/openai/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMediaUploadRoute = ApiMediaUploadRouteImport.update({
   id: '/api/media/upload',
   path: '/api/media/upload',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiHiggsfieldAdapterRoute = ApiHiggsfieldAdapterRouteImport.update({
+  id: '/api/higgsfield/adapter',
+  path: '/api/higgsfield/adapter',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiHiggsfieldResultJobIdRoute =
+  ApiHiggsfieldResultJobIdRouteImport.update({
+    id: '/api/higgsfield/result/$jobId',
+    path: '/api/higgsfield/result/$jobId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiHiggsfieldOauthStatusRoute =
+  ApiHiggsfieldOauthStatusRouteImport.update({
+    id: '/api/higgsfield/oauth/status',
+    path: '/api/higgsfield/oauth/status',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiHiggsfieldOauthDisconnectRoute =
+  ApiHiggsfieldOauthDisconnectRouteImport.update({
+    id: '/api/higgsfield/oauth/disconnect',
+    path: '/api/higgsfield/oauth/disconnect',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiHiggsfieldOauthConnectRoute =
+  ApiHiggsfieldOauthConnectRouteImport.update({
+    id: '/api/higgsfield/oauth/connect',
+    path: '/api/higgsfield/oauth/connect',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiHiggsfieldOauthCapabilitiesRoute =
+  ApiHiggsfieldOauthCapabilitiesRouteImport.update({
+    id: '/api/higgsfield/oauth/capabilities',
+    path: '/api/higgsfield/oauth/capabilities',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiHiggsfieldOauthCallbackRoute =
+  ApiHiggsfieldOauthCallbackRouteImport.update({
+    id: '/api/higgsfield/oauth/callback',
+    path: '/api/higgsfield/oauth/callback',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/health': typeof ApiHealthRoute
   '/api/user': typeof ApiUserRoute
+  '/api/higgsfield/adapter': typeof ApiHiggsfieldAdapterRoute
   '/api/media/upload': typeof ApiMediaUploadRoute
+  '/api/openai/profile': typeof ApiOpenaiProfileRoute
+  '/api/higgsfield/oauth/callback': typeof ApiHiggsfieldOauthCallbackRoute
+  '/api/higgsfield/oauth/capabilities': typeof ApiHiggsfieldOauthCapabilitiesRoute
+  '/api/higgsfield/oauth/connect': typeof ApiHiggsfieldOauthConnectRoute
+  '/api/higgsfield/oauth/disconnect': typeof ApiHiggsfieldOauthDisconnectRoute
+  '/api/higgsfield/oauth/status': typeof ApiHiggsfieldOauthStatusRoute
+  '/api/higgsfield/result/$jobId': typeof ApiHiggsfieldResultJobIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/health': typeof ApiHealthRoute
   '/api/user': typeof ApiUserRoute
+  '/api/higgsfield/adapter': typeof ApiHiggsfieldAdapterRoute
   '/api/media/upload': typeof ApiMediaUploadRoute
+  '/api/openai/profile': typeof ApiOpenaiProfileRoute
+  '/api/higgsfield/oauth/callback': typeof ApiHiggsfieldOauthCallbackRoute
+  '/api/higgsfield/oauth/capabilities': typeof ApiHiggsfieldOauthCapabilitiesRoute
+  '/api/higgsfield/oauth/connect': typeof ApiHiggsfieldOauthConnectRoute
+  '/api/higgsfield/oauth/disconnect': typeof ApiHiggsfieldOauthDisconnectRoute
+  '/api/higgsfield/oauth/status': typeof ApiHiggsfieldOauthStatusRoute
+  '/api/higgsfield/result/$jobId': typeof ApiHiggsfieldResultJobIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/health': typeof ApiHealthRoute
   '/api/user': typeof ApiUserRoute
+  '/api/higgsfield/adapter': typeof ApiHiggsfieldAdapterRoute
   '/api/media/upload': typeof ApiMediaUploadRoute
+  '/api/openai/profile': typeof ApiOpenaiProfileRoute
+  '/api/higgsfield/oauth/callback': typeof ApiHiggsfieldOauthCallbackRoute
+  '/api/higgsfield/oauth/capabilities': typeof ApiHiggsfieldOauthCapabilitiesRoute
+  '/api/higgsfield/oauth/connect': typeof ApiHiggsfieldOauthConnectRoute
+  '/api/higgsfield/oauth/disconnect': typeof ApiHiggsfieldOauthDisconnectRoute
+  '/api/higgsfield/oauth/status': typeof ApiHiggsfieldOauthStatusRoute
+  '/api/higgsfield/result/$jobId': typeof ApiHiggsfieldResultJobIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/robots.txt' | '/sitemap.xml' | '/api/user' | '/api/media/upload'
+    | '/'
+    | '/robots.txt'
+    | '/sitemap.xml'
+    | '/api/health'
+    | '/api/user'
+    | '/api/higgsfield/adapter'
+    | '/api/media/upload'
+    | '/api/openai/profile'
+    | '/api/higgsfield/oauth/callback'
+    | '/api/higgsfield/oauth/capabilities'
+    | '/api/higgsfield/oauth/connect'
+    | '/api/higgsfield/oauth/disconnect'
+    | '/api/higgsfield/oauth/status'
+    | '/api/higgsfield/result/$jobId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/robots.txt' | '/sitemap.xml' | '/api/user' | '/api/media/upload'
+  to:
+    | '/'
+    | '/robots.txt'
+    | '/sitemap.xml'
+    | '/api/health'
+    | '/api/user'
+    | '/api/higgsfield/adapter'
+    | '/api/media/upload'
+    | '/api/openai/profile'
+    | '/api/higgsfield/oauth/callback'
+    | '/api/higgsfield/oauth/capabilities'
+    | '/api/higgsfield/oauth/connect'
+    | '/api/higgsfield/oauth/disconnect'
+    | '/api/higgsfield/oauth/status'
+    | '/api/higgsfield/result/$jobId'
   id:
     | '__root__'
     | '/'
     | '/robots.txt'
     | '/sitemap.xml'
+    | '/api/health'
     | '/api/user'
+    | '/api/higgsfield/adapter'
     | '/api/media/upload'
+    | '/api/openai/profile'
+    | '/api/higgsfield/oauth/callback'
+    | '/api/higgsfield/oauth/capabilities'
+    | '/api/higgsfield/oauth/connect'
+    | '/api/higgsfield/oauth/disconnect'
+    | '/api/higgsfield/oauth/status'
+    | '/api/higgsfield/result/$jobId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   RobotsDottxtRoute: typeof RobotsDottxtRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
+  ApiHealthRoute: typeof ApiHealthRoute
   ApiUserRoute: typeof ApiUserRoute
+  ApiHiggsfieldAdapterRoute: typeof ApiHiggsfieldAdapterRoute
   ApiMediaUploadRoute: typeof ApiMediaUploadRoute
+  ApiOpenaiProfileRoute: typeof ApiOpenaiProfileRoute
+  ApiHiggsfieldOauthCallbackRoute: typeof ApiHiggsfieldOauthCallbackRoute
+  ApiHiggsfieldOauthCapabilitiesRoute: typeof ApiHiggsfieldOauthCapabilitiesRoute
+  ApiHiggsfieldOauthConnectRoute: typeof ApiHiggsfieldOauthConnectRoute
+  ApiHiggsfieldOauthDisconnectRoute: typeof ApiHiggsfieldOauthDisconnectRoute
+  ApiHiggsfieldOauthStatusRoute: typeof ApiHiggsfieldOauthStatusRoute
+  ApiHiggsfieldResultJobIdRoute: typeof ApiHiggsfieldResultJobIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,11 +248,74 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiUserRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/health': {
+      id: '/api/health'
+      path: '/api/health'
+      fullPath: '/api/health'
+      preLoaderRoute: typeof ApiHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/openai/profile': {
+      id: '/api/openai/profile'
+      path: '/api/openai/profile'
+      fullPath: '/api/openai/profile'
+      preLoaderRoute: typeof ApiOpenaiProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/media/upload': {
       id: '/api/media/upload'
       path: '/api/media/upload'
       fullPath: '/api/media/upload'
       preLoaderRoute: typeof ApiMediaUploadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/higgsfield/adapter': {
+      id: '/api/higgsfield/adapter'
+      path: '/api/higgsfield/adapter'
+      fullPath: '/api/higgsfield/adapter'
+      preLoaderRoute: typeof ApiHiggsfieldAdapterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/higgsfield/result/$jobId': {
+      id: '/api/higgsfield/result/$jobId'
+      path: '/api/higgsfield/result/$jobId'
+      fullPath: '/api/higgsfield/result/$jobId'
+      preLoaderRoute: typeof ApiHiggsfieldResultJobIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/higgsfield/oauth/status': {
+      id: '/api/higgsfield/oauth/status'
+      path: '/api/higgsfield/oauth/status'
+      fullPath: '/api/higgsfield/oauth/status'
+      preLoaderRoute: typeof ApiHiggsfieldOauthStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/higgsfield/oauth/disconnect': {
+      id: '/api/higgsfield/oauth/disconnect'
+      path: '/api/higgsfield/oauth/disconnect'
+      fullPath: '/api/higgsfield/oauth/disconnect'
+      preLoaderRoute: typeof ApiHiggsfieldOauthDisconnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/higgsfield/oauth/connect': {
+      id: '/api/higgsfield/oauth/connect'
+      path: '/api/higgsfield/oauth/connect'
+      fullPath: '/api/higgsfield/oauth/connect'
+      preLoaderRoute: typeof ApiHiggsfieldOauthConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/higgsfield/oauth/capabilities': {
+      id: '/api/higgsfield/oauth/capabilities'
+      path: '/api/higgsfield/oauth/capabilities'
+      fullPath: '/api/higgsfield/oauth/capabilities'
+      preLoaderRoute: typeof ApiHiggsfieldOauthCapabilitiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/higgsfield/oauth/callback': {
+      id: '/api/higgsfield/oauth/callback'
+      path: '/api/higgsfield/oauth/callback'
+      fullPath: '/api/higgsfield/oauth/callback'
+      preLoaderRoute: typeof ApiHiggsfieldOauthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -130,8 +325,17 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
+  ApiHealthRoute: ApiHealthRoute,
   ApiUserRoute: ApiUserRoute,
+  ApiHiggsfieldAdapterRoute: ApiHiggsfieldAdapterRoute,
   ApiMediaUploadRoute: ApiMediaUploadRoute,
+  ApiOpenaiProfileRoute: ApiOpenaiProfileRoute,
+  ApiHiggsfieldOauthCallbackRoute: ApiHiggsfieldOauthCallbackRoute,
+  ApiHiggsfieldOauthCapabilitiesRoute: ApiHiggsfieldOauthCapabilitiesRoute,
+  ApiHiggsfieldOauthConnectRoute: ApiHiggsfieldOauthConnectRoute,
+  ApiHiggsfieldOauthDisconnectRoute: ApiHiggsfieldOauthDisconnectRoute,
+  ApiHiggsfieldOauthStatusRoute: ApiHiggsfieldOauthStatusRoute,
+  ApiHiggsfieldResultJobIdRoute: ApiHiggsfieldResultJobIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

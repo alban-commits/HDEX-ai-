@@ -1,5 +1,5 @@
 /**
- * Security headers applied to every Worker response. Import in app/src/server.ts
+ * Security headers applied to every Node server response. Import in app/src/server.ts
  * and wrap the final response: `return applySecurityHeaders(response)`.
  */
 export function applySecurityHeaders(response: Response): Response {
@@ -14,9 +14,7 @@ export function applySecurityHeaders(response: Response): Response {
       "font-src 'self' https://fonts.gstatic.com; " +
       "img-src 'self' data: https:; media-src 'self' https:; " +
       "connect-src 'self' https:; " +
-      // The host-provided approval flow is an injected Cloudflare iframe. Keep
-      // this allowlist exact so CSP cannot silently bypass or block approval.
-      "frame-src 'self' https://auth.higgsfield.app https://auth.higgsfield-dev.app; " +
+      "frame-src 'self'; " +
       "base-uri 'self'; form-action 'self'",
   );
   headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");

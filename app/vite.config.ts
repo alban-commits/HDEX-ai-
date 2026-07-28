@@ -6,7 +6,8 @@ import {
   higgsfieldDesignSourceBabelPlugin,
 } from "./src/module/design-inspector/vite";
 import svgr from "vite-plugin-svgr";
-import { defaultServerConditions, defineConfig } from "vite";
+import { nitro } from "nitro/vite";
+import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
 
 // The vendored @higgsfield/quanta components import their glyphs from the private
@@ -16,7 +17,7 @@ import { fileURLToPath } from "node:url";
 // the matching `paths` entry so type-checking resolves it too.
 const QUANTA_ICONS_SHIM = fileURLToPath(new URL("./src/lib/quanta-icons.ts", import.meta.url));
 
-export default defineConfig(({ command, mode }) => {
+export default defineConfig(({ mode }) => {
   const designInspectorEnabled = process.env.HF_DESIGN_INSPECTOR === "1" || mode === "design";
 
   return {
@@ -29,45 +30,6 @@ export default defineConfig(({ command, mode }) => {
     resolve: {
       alias: [{ find: /^@higgsfield-ai\/icons(\/.*)?$/, replacement: QUANTA_ICONS_SHIM }],
       tsconfigPaths: true,
-    },
-    // The server bundle runs as a Cloudflare Worker — there is no node_modules
-    // at runtime. Vite's default SSR build leaves npm deps as bare external
-    // imports (h3, react, @tanstack/*, seroval, …), which resolve on a Node
-    // server but throw "No such module" in a Worker. Bundle them all in.
-    // (node: builtins stay external — nodejs_compat provides them.)
-    // BUILD ONLY: `vite dev` SSR runs in Node where externalized deps are
-    // correct — noExternal there makes the dev module runner evaluate CJS
-    // deps (react) as ESM and crash with "module is not defined".
-    ssr: {
-      // BUILD ONLY: the SSR bundle runs on workerd (Cloudflare Workers), not
-      // Node. Target a worker runtime and resolve bundled deps through the
-      // edge export conditions (workerd/worker/browser) so packages that ship
-      // both variants bundle their edge build (react-dom's web-streams server,
-      // etc.) instead of the Node variant leaning on nodejs_compat shims.
-      // `vite dev` SSR runs in Node, where default node resolution is correct.
-      ...(command === "build"
-        ? {
-            target: "webworker" as const,
-            resolve: {
-              conditions: [
-                "workerd",
-                "worker",
-                "browser",
-                ...defaultServerConditions.filter((c) => c !== "node"),
-              ],
-            },
-          }
-        : {}),
-      noExternal: command === "build" ? true : undefined,
-      // `cloudflare:workers` is a workerd runtime built-in that exposes the Worker
-      // env / bindings (D1 `DB`, R2 `STORAGE`). Like node: builtins it must NOT be
-      // bundled; the runtime provides it. (`ssr.external` is typed string[].)
-      external: ["cloudflare:workers"],
-    },
-    build: {
-      // Keep `cloudflare:*` external in the SSR rollup pass too — `noExternal`
-      // above would otherwise try to resolve+bundle it and fail.
-      rollupOptions: { external: [/^cloudflare:/] },
     },
     plugins: [
       // Local SVG assets (e.g. the branded generate-button sparkle) import as
@@ -98,6 +60,9 @@ export default defineConfig(({ command, mode }) => {
       tanstackStart({
         server: { entry: "server" },
       }),
+      // Nitro emits the portable Node server used by df-deploy on Windows:
+      // `.output/server/index.mjs` plus `.output/public`.
+      nitro({ preset: "node-server" }),
       higgsfieldDesignInspectorVitePlugin(designInspectorEnabled),
       react({
         babel: {

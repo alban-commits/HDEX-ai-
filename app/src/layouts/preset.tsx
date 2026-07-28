@@ -32,8 +32,17 @@ import type {
 import type { GalleryItem } from "@/components/gallery";
 import { generationToGalleryItem } from "@/lib/higgsfield-generation-results";
 import { getNextCursor } from "@/lib/cursor-pages";
-import { GUEST_SCOPE_KEY, getSignInUrl, PRESET_JOBS, uploadAsset } from "@/lib/fnf.browser";
-import { composeInfluencerProfile } from "@/lib/profile.functions";
+import {
+  GUEST_SCOPE_KEY,
+  getReconnectSignInUrl,
+  getSignInUrl,
+  PRESET_JOBS,
+  releaseAllLocalUploads,
+  releaseLocalUpload,
+  subscribeHiggsfieldReconnect,
+  uploadAsset,
+} from "@/lib/fnf.browser";
+import { composeInfluencerProfile } from "@/lib/profile.browser";
 import { savePreferences } from "@/lib/preferences.functions";
 import catalogJson from "@/data/reference-catalog.json";
 
@@ -166,6 +175,19 @@ export function PresetTemplate() {
   const [activeTab, setActiveTab] = useState("json");
   const [pendingSignInUrl, setPendingSignInUrl] = useState<string | null>(null);
 
+  useEffect(
+    () =>
+      subscribeHiggsfieldReconnect(() => {
+        setPendingSignInUrl(
+          getReconnectSignInUrl(
+            `${window.location.pathname}${window.location.search}${window.location.hash}`,
+          ),
+        );
+      }),
+    [],
+  );
+  useEffect(() => releaseAllLocalUploads, []);
+
   const history = useInfiniteQuery({
     ...jobsFeedQueryOptions(jobClient, HISTORY_QUERY, { scopeKey }),
     getNextPageParam: getNextCursor,
@@ -238,13 +260,22 @@ export function PresetTemplate() {
     run.reset();
   }, [queryClient, run, run.generations, scopeKey]);
 
+  const selectPose = useCallback((selected: AssetSelection) => {
+    const previousId = pose?.ref?.id;
+    if (previousId && previousId !== selected.ref?.id) {
+      releaseLocalUpload(previousId);
+      setUploads((current) => current.filter((entry) => entry.ref?.id !== previousId));
+    }
+    setPose(selected);
+  }, [pose]);
+
   const handleUpload = useCallback(async (file: File) => {
     const selected = await uploadAsset(file);
     const item = { ...selected, kind: "upload" as const, personal: true };
     setUploads((current) => [item, ...current.filter((entry) => entry.ref?.id !== item.ref?.id)]);
-    setPose(selected);
+    selectPose(selected);
     return selected;
-  }, []);
+  }, [selectPose]);
 
   const requireSignIn = () => {
     const signInUrl = getSignInUrl(
@@ -268,7 +299,7 @@ export function PresetTemplate() {
         environment: selectedEnvironment?.label ?? environment,
         scene: selectedScene?.label ?? scene,
         imageType,
-        poseImageUrl: pose.src,
+        poseMediaId: pose.ref?.id ?? "",
         referenceImageUrls: (selectedScene?.images ?? []).map(
           (path) => `${window.location.origin}${path}`,
         ),
@@ -406,7 +437,7 @@ export function PresetTemplate() {
           items={uploads}
           pagination={pagination}
           onUpload={handleUpload}
-          onSelect={setPose}
+          onSelect={selectPose}
           trigger={
             pose ? (
               <UploadField
@@ -414,6 +445,10 @@ export function PresetTemplate() {
                 previewAlt={pose.name}
                 previewType="image"
                 onRemove={() => {
+                  if (pose.ref?.id) {
+                    releaseLocalUpload(pose.ref.id);
+                    setUploads((current) => current.filter((entry) => entry.ref?.id !== pose.ref?.id));
+                  }
                   setPose(null);
                   setProfile(null);
                 }}

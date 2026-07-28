@@ -237,7 +237,7 @@ function ScopedApp() {
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <a
-              href="/__auth/login?return=/"
+              href="/api/higgsfield/oauth/connect?return=/"
               className={button({ variant: "primary", size: "md" })}
             >
               Sign in

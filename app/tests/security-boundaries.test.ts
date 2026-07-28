@@ -3,11 +3,12 @@ import { applySecurityHeaders } from "../src/lib/security-headers.server";
 import { MAX_UPLOAD_BYTES, rejectUnsafeUploadRequest } from "../src/lib/upload-request-security";
 
 describe("response security headers", () => {
-  test("allows only the host approval iframe origins", () => {
+  test("does not allow third-party auth frames", () => {
     const response = applySecurityHeaders(new Response("ok"));
     expect(response.headers.get("content-security-policy")).toContain(
-      "frame-src 'self' https://auth.higgsfield.app https://auth.higgsfield-dev.app;",
+      "frame-src 'self';",
     );
+    expect(response.headers.get("content-security-policy")).not.toContain("auth.higgsfield");
     expect(response.headers.get("content-security-policy")).not.toContain("frame-ancestors");
   });
 });

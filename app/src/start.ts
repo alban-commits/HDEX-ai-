@@ -19,6 +19,7 @@ const errorMiddleware = createMiddleware().server(async ({ next }) => {
 
 const csrfMiddleware = createCsrfMiddleware({
   filter: (context) => context.handlerType === "serverFn",
+  ...(process.env.HDEX_PUBLIC_ORIGIN ? { origin: process.env.HDEX_PUBLIC_ORIGIN } : {}),
 });
 
 export const startInstance = createStart(() => ({
