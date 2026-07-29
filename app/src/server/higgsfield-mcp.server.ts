@@ -776,7 +776,6 @@ export async function inspectHiggsfieldProvider(input: {
   const generateTool = tools.find((tool) => tool.name === "generate_image");
   const models: DiscoveredModelProfile[] = [];
   let listedModels: SearchModel[] | undefined;
-  let modelListComplete = false;
   const listModels = async (): Promise<SearchModel[]> => {
     if (listedModels) return listedModels;
     listedModels = [];
@@ -798,10 +797,7 @@ export async function inspectHiggsfieldProvider(input: {
       );
       const pageResult = nextModelPage(response);
       if (!pageResult.valid) break;
-      if (!pageResult.nextPageToken) {
-        modelListComplete = true;
-        break;
-      }
+      if (!pageResult.nextPageToken) break;
       if (cursors.has(pageResult.nextPageToken)) break;
       cursors.add(pageResult.nextPageToken);
       nextCursor = pageResult.nextPageToken;
@@ -809,64 +805,70 @@ export async function inspectHiggsfieldProvider(input: {
     return listedModels;
   };
   for (const target of MODEL_TARGETS) {
-    const strictSearch = await input.callTool("models_explore", {
-      action: "search",
-      query: target.searchName,
-      type: "image",
-      input: "image",
-      limit: 20,
+    const canonicalCandidate: SearchModel = {
+      id: target.canonicalJobSetType,
+      name: target.searchName,
+      raw: {},
+    };
+    let canonicalDetail: Record<string, unknown> | undefined;
+    try {
+      canonicalDetail =
+        detailRecord(
+          await input.callTool("models_explore", {
+            action: "get",
+            model_id: target.canonicalJobSetType,
+          }),
+          target.canonicalJobSetType,
+        ) ?? undefined;
+    } catch (error) {
+      if (
+        !(error instanceof HiggsfieldMcpError) ||
+        (error.reason !== "provider_failure" && error.reason !== "invalid_response")
+      ) {
+        throw error;
+      }
+      canonicalDetail = undefined;
+    }
+    const profile = buildModelProfile({
+      target,
+      candidate: canonicalCandidate,
+      detail: canonicalDetail,
+      generateTool,
     });
-    let candidates = modelItems(strictSearch);
-    let exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
-    if (exact.length === 0) {
-      const relaxedSearch = await input.callTool("models_explore", {
-        action: "search",
-        query: target.searchName,
-        type: "image",
-        limit: 20,
-      });
-      candidates = modelItems(relaxedSearch);
-      exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
-    }
-    if (exact.length === 0) {
-      candidates = await listModels();
-      exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
-    }
-    exact = [...new Map(exact.map((candidate) => [candidate.id, candidate])).values()];
-    const canonical = exact.filter((candidate) => candidate.id === target.canonicalJobSetType);
-    if (canonical.length > 0) exact = canonical;
-    const details = await Promise.all(
-      exact.map(
-        async (candidate) =>
-          detailRecord(
-            await input.callTool("models_explore", {
-              action: "get",
-              model_id: candidate.id,
-            }),
-            candidate.id,
-          ) ?? undefined,
-      ),
-    );
-    const discoveryIncomplete = listedModels !== undefined && !modelListComplete;
-    let profile: DiscoveredModelProfile;
-    if (discoveryIncomplete) {
-      profile = { ...modelIdentity(target), available: false, reason: "model_ambiguous" };
-    } else if (exact.length === 0) {
-      profile = { ...modelIdentity(target), available: false, reason: "model_missing" };
-    } else {
-      const executable = exact
-        .map((candidate, index) =>
-          buildModelProfile({ target, candidate, detail: details[index], generateTool }),
-        )
-        .filter((candidate) => candidate.available);
-      profile =
-        executable.length === 1
-          ? executable[0]!
-          : {
-              ...modelIdentity(target),
-              available: false,
-              reason: executable.length > 1 ? "model_ambiguous" : "profile_invalid",
-            };
+
+    if (!profile.available) {
+      // Alias discovery remains bounded diagnostics only. A failed canonical lookup must never
+      // promote a similarly named provider model into the executable profile.
+      try {
+        const strictSearch = await input.callTool("models_explore", {
+          action: "search",
+          query: target.searchName,
+          type: "image",
+          input: "image",
+          limit: 20,
+        });
+        let candidates = modelItems(strictSearch);
+        let exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
+        if (exact.length === 0) {
+          const relaxedSearch = await input.callTool("models_explore", {
+            action: "search",
+            query: target.searchName,
+            type: "image",
+            limit: 20,
+          });
+          candidates = modelItems(relaxedSearch);
+          exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
+        }
+        if (exact.length === 0) await listModels();
+      } catch (error) {
+        if (
+          !(error instanceof HiggsfieldMcpError) ||
+          (error.reason !== "provider_failure" && error.reason !== "invalid_response")
+        ) {
+          throw error;
+        }
+        // Canonical readiness already failed closed; provider diagnostics must not change it.
+      }
     }
     models.push(
       requiredToolsReady
