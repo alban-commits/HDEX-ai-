@@ -190,6 +190,12 @@ async function discoveredRecord(): Promise<{
               },
             ],
           },
+          content: [
+            {
+              type: "text",
+              text: "```json\n{\"models\":[]}\n```",
+            },
+          ],
         };
       }
       return {
@@ -197,6 +203,12 @@ async function discoveredRecord(): Promise<{
           args.model_id === "soul_v2"
             ? canonicalDetail("Soul 2")
             : canonicalDetail("GPT Image 2"),
+        content: [
+          {
+            type: "text",
+            text: "```json\n{\"id\":\"explanatory-non-authoritative-model\"}\n```",
+          },
+        ],
       };
     },
   });
@@ -995,7 +1007,25 @@ describe("Higgsfield MCP discovery boundary", () => {
               },
             ],
           },
-          content: [{ type: "text", text: "The generation request was accepted." }],
+          content: [
+            { type: "text", text: "The generation request was accepted." },
+            {
+              type: "text",
+              text: [
+                "```json",
+                JSON.stringify({
+                  results: [
+                    {
+                      id: "provider-non-authoritative-fenced-job",
+                      model: "soul_v2",
+                      status: "queued",
+                    },
+                  ],
+                }),
+                "```",
+              ].join("\n"),
+            },
+          ],
         },
       },
       {
@@ -1003,6 +1033,7 @@ describe("Higgsfield MCP discovery boundary", () => {
         providerJobId: "provider-json-explanation-1",
         responseShape: "json_text",
         response: {
+          structuredContent: null,
           content: [
             { type: "text", text: "The generation request was accepted." },
             {
@@ -1212,7 +1243,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       name: string;
       content: Array<{ type: "text"; text: string }>;
       parseFailure: "malformed" | "oversized" | "ambiguous";
-      structuredContent?: Record<string, unknown>;
+      structuredContent?: unknown;
     }> = [
       {
         name: "malformed",
@@ -1253,23 +1284,19 @@ describe("Higgsfield MCP discovery boundary", () => {
         parseFailure: "ambiguous",
       },
       {
-        name: "structured-json-ambiguous",
-        structuredContent: {
-          results: [
-            { id: "provider-structured-candidate-1", model: "soul_v2", status: "queued" },
-          ],
-        },
+        name: "invalid-structured-type",
+        structuredContent: "not-a-provider-record",
         content: [
           {
             type: "text",
             text: JSON.stringify({
               results: [
-                { id: "provider-json-candidate-2", model: "soul_v2", status: "queued" },
+                { id: "provider-fallback-must-not-run", model: "soul_v2", status: "queued" },
               ],
             }),
           },
         ],
-        parseFailure: "ambiguous",
+        parseFailure: "malformed",
       },
     ];
     for (const scenario of cases) {
@@ -1295,7 +1322,7 @@ describe("Higgsfield MCP discovery boundary", () => {
             creates += 1;
             return {
               content: scenario.content,
-              ...(scenario.structuredContent
+              ...(scenario.structuredContent !== undefined
                 ? { structuredContent: scenario.structuredContent }
                 : {}),
             };

@@ -458,7 +458,6 @@ function jsonObjectCandidatesFromText(text: string): Record<string, unknown>[] {
 
 export function parseHiggsfieldMcpContent(
   value: unknown,
-  options: { strictText?: boolean; allowPlainTextError?: boolean } = {},
 ): {
   content: Record<string, unknown>;
   isError: boolean;
@@ -478,16 +477,28 @@ export function parseHiggsfieldMcpContent(
       rejectionClass: "unknown",
     };
   }
-  const candidates: Record<string, unknown>[] = [];
   const hasStructuredContent = isRecord(value.structuredContent);
-  if (hasStructuredContent) candidates.push(value.structuredContent as Record<string, unknown>);
-  else if (
-    options.strictText &&
-    value.structuredContent !== undefined &&
-    value.structuredContent !== null
-  ) {
+  if (hasStructuredContent) {
+    try {
+      const serialized = JSON.stringify(value.structuredContent);
+      if (Buffer.byteLength(serialized) > HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) {
+        throw new HiggsfieldMcpContentError("response_limit", "oversized");
+      }
+    } catch (error) {
+      if (error instanceof HiggsfieldMcpError) throw error;
+      throw new HiggsfieldMcpContentError("invalid_response", "malformed");
+    }
+    return {
+      content: value.structuredContent as Record<string, unknown>,
+      isError: value.isError === true,
+      responseShape: "structured",
+      rejectionClass: "unknown",
+    };
+  }
+  if (value.structuredContent !== undefined && value.structuredContent !== null) {
     throw new HiggsfieldMcpContentError("invalid_response", "malformed");
   }
+  const candidates: Record<string, unknown>[] = [];
   let totalTextBytes = 0;
   let textCount = 0;
   let plainTextRejectionClass: HiggsfieldMcpRejectionClass = "unknown";
@@ -507,7 +518,6 @@ export function parseHiggsfieldMcpContent(
       }
       if (
         textCandidates.length === 0 &&
-        options.allowPlainTextError &&
         value.isError === true
       ) {
         plainTextRejectionClass = strongerRejectionClass(
@@ -520,7 +530,6 @@ export function parseHiggsfieldMcpContent(
   if (
     candidates.length === 0 &&
     textCount > 0 &&
-    options.allowPlainTextError &&
     value.isError === true
   ) {
     return {
@@ -533,7 +542,7 @@ export function parseHiggsfieldMcpContent(
   if (candidates.length === 0) {
     throw new HiggsfieldMcpContentError(
       "invalid_response",
-      options.strictText && textCount > 0 ? "malformed" : "missing",
+      textCount > 0 ? "malformed" : "missing",
     );
   }
   try {
@@ -557,7 +566,7 @@ export function parseHiggsfieldMcpContent(
   return {
     content: candidates[0]!,
     isError: value.isError === true,
-    responseShape: hasStructuredContent ? "structured" : "json_text",
+    responseShape: "json_text",
     rejectionClass: "unknown",
   };
 }

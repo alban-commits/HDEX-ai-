@@ -86,10 +86,7 @@ function structuredGenerationContent(value: unknown): {
   responseShape: Exclude<HiggsfieldMcpResponseShape, "invalid">;
   rejectionClass: HiggsfieldMcpRejectionClass;
 } {
-  const parsed = parseHiggsfieldMcpContent(value, {
-    strictText: true,
-    allowPlainTextError: true,
-  });
+  const parsed = parseHiggsfieldMcpContent(value);
   return {
     content: parsed.content,
     toolError: parsed.isError,
