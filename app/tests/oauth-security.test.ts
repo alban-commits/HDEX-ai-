@@ -4,6 +4,7 @@ import {
   beginHiggsfieldOAuth,
   completeHiggsfieldOAuth,
   getHiggsfieldOAuthStatus,
+  HIGGSFIELD_OAUTH_STATE_COOKIE,
   readHiggsfieldOAuthSession,
   validateHiggsfieldOAuthCallbackState,
   type HiggsfieldOAuthConfig,
@@ -133,6 +134,15 @@ function cookieHeader(values: HiggsfieldOAuthCookieValues): string {
     .join("; ");
 }
 
+function stateCookieHeader(response: Response): string {
+  const header = response.headers.get("set-cookie") ?? "";
+  const pair = header.split(";", 1)[0];
+  if (!pair?.startsWith(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`)) {
+    throw new Error("expected OAuth state cookie");
+  }
+  return pair;
+}
+
 describe("Higgsfield OAuth security contract", () => {
   test("uses discovery, DCR, PKCE S256, resource binding, and sealed split cookies", async () => {
     const { cookies, authorizationUrl } = await connectedCookies();
@@ -233,6 +243,7 @@ describe("Higgsfield OAuth security contract", () => {
     expect(stateHeader).toContain("HttpOnly");
     expect(stateHeader).toContain("Secure");
     expect(stateHeader).toContain("SameSite=Lax");
+    expect(stateHeader).toContain("Path=/api/higgsfield/oauth");
     expect(stateHeader).not.toContain("personal-access-token");
     const stateCookie = stateHeader.split(";", 1)[0]!;
     const authorization = new URL(connect.headers.get("location")!);
@@ -286,6 +297,142 @@ describe("Higgsfield OAuth security contract", () => {
     const cleared = disconnected.headers.get("set-cookie") ?? "";
     expect((cleared.match(/Max-Age=0/g) ?? []).length).toBeGreaterThanOrEqual(4);
     expect(cleared).toContain("HttpOnly");
+  });
+
+  test("keeps a connected session and does not replace pending state on another connect", async () => {
+    const { cookies } = await connectedCookies();
+    const pending = await beginHiggsfieldOAuth(config, discoveryFetch(), NOW);
+    let providerCalls = 0;
+    const connected = await handleOAuthConnect(
+      new Request(
+        `${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=${encodeURIComponent("/presets?tab=history#latest")}`,
+        {
+          headers: {
+            cookie: `${cookieHeader(cookies)}; ${HIGGSFIELD_OAUTH_STATE_COOKIE}=${encodeURIComponent(pending.stateCookie)}`,
+          },
+        },
+      ),
+      {
+        env,
+        fetchImpl: async () => {
+          providerCalls += 1;
+          throw new Error("connected connect must not contact provider");
+        },
+        now: NOW + 1_000,
+      },
+    );
+    expect(connected.headers.get("location")).toBe(
+      `${PUBLIC_ORIGIN}/presets?tab=history#latest`,
+    );
+    expect(connected.headers.get("set-cookie")).toBeNull();
+    expect(providerCalls).toBe(0);
+
+    const unsafeReturn = await handleOAuthConnect(
+      new Request(
+        `${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=${encodeURIComponent("https://attacker.example/")}`,
+        { headers: { cookie: cookieHeader(cookies) } },
+      ),
+      { env, now: NOW + 1_000 },
+    );
+    expect(unsafeReturn.headers.get("location")).toBe(`${PUBLIC_ORIGIN}/`);
+  });
+
+  test("starts a fresh OAuth flow when the existing session requires reconnect", async () => {
+    const { cookies } = await connectedCookies(120);
+    let refreshCalls = 0;
+    const reconnectFetch = discoveryFetch({
+      tokenHook: (body) => {
+        expect(body.get("grant_type")).toBe("refresh_token");
+        refreshCalls += 1;
+        return Response.json({ error: "invalid_grant" }, { status: 400 });
+      },
+    });
+    const response = await handleOAuthConnect(
+      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=/presets`, {
+        headers: { cookie: cookieHeader(cookies) },
+      }),
+      { env, fetchImpl: reconnectFetch, now: NOW },
+    );
+    expect(refreshCalls).toBe(1);
+    expect(new URL(response.headers.get("location")!).origin).toBe("https://auth.higgsfield.ai");
+    expect(response.headers.get("set-cookie")).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
+  });
+
+  test("rejects a late callback without deleting the newer pending state", async () => {
+    const first = await handleOAuthConnect(
+      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=/presets`),
+      { env, fetchImpl: discoveryFetch(), now: NOW },
+    );
+    const firstAuthorization = new URL(first.headers.get("location")!);
+    const second = await handleOAuthConnect(
+      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=/presets`, {
+        headers: { cookie: stateCookieHeader(first) },
+      }),
+      { env, fetchImpl: discoveryFetch(), now: NOW + 1_000 },
+    );
+    const secondAuthorization = new URL(second.headers.get("location")!);
+    const secondStateCookie = stateCookieHeader(second);
+    let lateTokenCalls = 0;
+    const late = await handleOAuthCallback(
+      new Request(
+        `${config.callbackUrl}?code=late-code&state=${encodeURIComponent(firstAuthorization.searchParams.get("state")!)}`,
+        { headers: { cookie: secondStateCookie } },
+      ),
+      {
+        env,
+        fetchImpl: async () => {
+          lateTokenCalls += 1;
+          throw new Error("invalid state must not exchange a token");
+        },
+        now: NOW + 2_000,
+      },
+    );
+    expect(late.headers.get("location")).toBe(
+      `${PUBLIC_ORIGIN}/?higgsfield=error&reason=state_invalid`,
+    );
+    expect(late.headers.get("set-cookie")).toBeNull();
+    expect(lateTokenCalls).toBe(0);
+
+    const current = await handleOAuthCallback(
+      new Request(
+        `${config.callbackUrl}?code=current-code&state=${encodeURIComponent(secondAuthorization.searchParams.get("state")!)}`,
+        { headers: { cookie: secondStateCookie } },
+      ),
+      { env, fetchImpl: discoveryFetch(), now: NOW + 2_000 },
+    );
+    expect(current.headers.get("location")).toBe(`${PUBLIC_ORIGIN}/presets`);
+  });
+
+  test("state_invalid does not clear a separate valid OAuth session", async () => {
+    const { cookies } = await connectedCookies();
+    const pending = await beginHiggsfieldOAuth(config, discoveryFetch(), NOW);
+    const requestCookies = `${cookieHeader(cookies)}; ${HIGGSFIELD_OAUTH_STATE_COOKIE}=${encodeURIComponent(pending.stateCookie)}`;
+    const callback = await handleOAuthCallback(
+      new Request(`${config.callbackUrl}?code=ignored&state=wrong-state`, {
+        headers: { cookie: requestCookies },
+      }),
+      {
+        env,
+        fetchImpl: async () => {
+          throw new Error("invalid state must not contact provider");
+        },
+        now: NOW + 1_000,
+      },
+    );
+    expect(callback.headers.get("location")).toBe(
+      `${PUBLIC_ORIGIN}/?higgsfield=error&reason=state_invalid`,
+    );
+    expect(callback.headers.get("set-cookie")).toBeNull();
+
+    const status = await handleOAuthStatus(
+      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/status`, {
+        headers: { cookie: cookieHeader(cookies) },
+      }),
+      { env, now: NOW + 1_000 },
+    );
+    const statusBody = (await status.json()) as Record<string, unknown>;
+    expect(statusBody).toMatchObject({ connected: true });
+    expect(statusBody).not.toHaveProperty("reconnectRequired");
   });
 
   test("does not accept a public origin downgrade or an arbitrary MCP endpoint", async () => {

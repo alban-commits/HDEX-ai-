@@ -12,6 +12,7 @@ import {
   HIGGSFIELD_OAUTH_STATE_COOKIE,
   HIGGSFIELD_OAUTH_STATE_TTL_SECONDS,
   readHiggsfieldOAuthSession,
+  safeOAuthReturnPath,
   validateHiggsfieldOAuthCallbackState,
   type HiggsfieldOAuthCookieBundle,
   type HiggsfieldOAuthCookieValues,
@@ -132,7 +133,21 @@ export async function handleOAuthConnect(
   const crossSite = rejectCrossSiteMutation(request, config.publicOrigin);
   if (crossSite) return crossSite;
   try {
-    const returnPath = new URL(request.url).searchParams.get("return") ?? "/";
+    const returnPath = safeOAuthReturnPath(
+      new URL(request.url).searchParams.get("return") ?? "/",
+    );
+    const original = readOAuthCookies(request);
+    const status = await getHiggsfieldOAuthStatus({
+      config,
+      sessionCookies: original,
+      fetchImpl: options.fetchImpl,
+      now: options.now,
+    });
+    if (status.connected) {
+      const response = oauthRedirect(config, returnPath, "connected");
+      if (status.sessionCookies) appendOAuthSessionCookies(response.headers, status.sessionCookies);
+      return response;
+    }
     const started = await beginHiggsfieldOAuth(
       config,
       options.fetchImpl,
@@ -180,7 +195,6 @@ export async function handleOAuthCallback(
     });
   } catch {
     const response = oauthRedirect(config, "/", "error", "state_invalid");
-    clearSealedCookie(response.headers, HIGGSFIELD_OAUTH_STATE_COOKIE, "/api/higgsfield/oauth");
     return response;
   }
   const providerError = url.searchParams.get("error");

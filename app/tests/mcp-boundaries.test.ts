@@ -31,7 +31,7 @@ import {
   isHiggsfieldAuthenticationFailure,
 } from "../src/server/higgsfield-reconnect.server";
 
-const NOW = Date.UTC(2026, 6, 27, 5, 0, 0);
+const NOW = Date.UTC(2099, 0, 1, 5, 0, 0);
 const GENERATION_TEMP_DIR = await mkdtemp(join(tmpdir(), "hdex-mcp-boundaries-"));
 const GENERATION_ENV = {
   HDEX_GENERATION_ENABLED: "true",
@@ -152,6 +152,10 @@ function detail(name: "Soul 2" | "GPT Image 2") {
     aspect_ratios: aspects,
     medias: [{ roles: ["reference"], max: soul ? 1 : 4 }],
   };
+}
+
+function soulDetail(id: string) {
+  return { ...structuredClone(detail("Soul 2")), id };
 }
 
 async function discoveredRecord(): Promise<{
@@ -499,7 +503,106 @@ describe("Higgsfield MCP discovery boundary", () => {
     ).toBe(true);
   });
 
-  test("fails closed when an exact model name resolves to multiple provider IDs", async () => {
+  test("selects the only Soul alias candidate whose detailed execution contract is valid", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const record = await inspectHiggsfieldProvider({
+      now: NOW,
+      listTools: async () => ({ tools }),
+      callTool: async (name, args) => {
+        calls.push({ name, args });
+        if (args.action === "search" && args.query === "Higgsfield Soul V2") {
+          return {
+            structuredContent: {
+              models: [
+                { id: "runtime/soul-valid", name: "Higgsfield Soul V2" },
+                { id: "runtime/soul-invalid", name: "Soul 2" },
+              ],
+            },
+          };
+        }
+        if (args.action === "search") {
+          const model = detail("GPT Image 2");
+          return { structuredContent: { models: [{ id: model.id, name: model.name }] } };
+        }
+        if (args.model_id === "runtime/soul-valid") {
+          return { structuredContent: soulDetail("runtime/soul-valid") };
+        }
+        if (args.model_id === "runtime/soul-invalid") {
+          const invalid = soulDetail("runtime/soul-invalid");
+          invalid.medias = [{ roles: ["mask"], max: 1 }];
+          return { structuredContent: invalid };
+        }
+        return { structuredContent: detail("GPT Image 2") };
+      },
+    });
+    expect(record.models[0]).toMatchObject({
+      available: true,
+      modelId: "runtime/soul-valid",
+    });
+    expect(record.models[1]).toMatchObject({ available: true });
+    expect(calls.filter((call) => call.args.action === "get")).toHaveLength(3);
+    expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
+  });
+
+  test("excludes Soul candidates with the wrong provider, output type, or input contract", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const record = await inspectHiggsfieldProvider({
+      now: NOW,
+      listTools: async () => ({ tools }),
+      callTool: async (name, args) => {
+        calls.push({ name, args });
+        if (args.action === "search" && args.query === "Higgsfield Soul V2") {
+          return {
+            structuredContent: {
+              models: [
+                { id: "runtime/soul-valid", name: "Soul 2" },
+                { id: "runtime/soul-provider", name: "Soul V2" },
+                { id: "runtime/soul-output", name: "Soul 2.0" },
+                { id: "runtime/soul-parameters", name: "Higgsfield Soul V2" },
+              ],
+            },
+          };
+        }
+        if (args.action === "search") {
+          const model = detail("GPT Image 2");
+          return { structuredContent: { models: [model] } };
+        }
+        if (args.model_id === "runtime/soul-provider") {
+          return {
+            structuredContent: {
+              ...soulDetail("runtime/soul-provider"),
+              provider_name: "Different Provider",
+            },
+          };
+        }
+        if (args.model_id === "runtime/soul-output") {
+          return {
+            structuredContent: {
+              ...soulDetail("runtime/soul-output"),
+              output_type: "video",
+            },
+          };
+        }
+        if (args.model_id === "runtime/soul-parameters") {
+          const invalid = soulDetail("runtime/soul-parameters");
+          invalid.parameters = [{ name: "aspect_ratio", options: invalid.aspect_ratios }];
+          return { structuredContent: invalid };
+        }
+        if (args.model_id === "runtime/soul-valid") {
+          return { structuredContent: soulDetail("runtime/soul-valid") };
+        }
+        return { structuredContent: detail("GPT Image 2") };
+      },
+    });
+    expect(record.models[0]).toMatchObject({
+      available: true,
+      modelId: "runtime/soul-valid",
+    });
+    expect(record.models[1]).toMatchObject({ available: true });
+    expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
+  });
+
+  test("fails closed when two Soul provider IDs both satisfy the detailed contract", async () => {
     const record = await inspectHiggsfieldProvider({
       now: NOW,
       listTools: async () => ({ tools }),
@@ -517,6 +620,9 @@ describe("Higgsfield MCP discovery boundary", () => {
         if (args.action === "search") {
           const model = detail("GPT Image 2");
           return { structuredContent: { models: [{ id: model.id, name: model.name }] } };
+        }
+        if (args.model_id === "runtime/soul-a" || args.model_id === "runtime/soul-b") {
+          return { structuredContent: soulDetail(String(args.model_id)) };
         }
         return { structuredContent: detail("GPT Image 2") };
       },

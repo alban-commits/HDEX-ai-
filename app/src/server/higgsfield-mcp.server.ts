@@ -17,19 +17,25 @@ const MODEL_TARGETS = [
     key: "soul_2",
     searchName: "Higgsfield Soul V2",
     displayName: "Soul 2",
+    providerName: "Higgsfield",
     aliases: ["Higgsfield Soul V2", "Soul V2", "Soul 2", "Soul 2.0"],
     aspects: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"],
     resolution: "2k",
     qualities: [],
+    mediaRole: "reference",
+    maximumImages: 1,
   },
   {
     key: "gpt_image_2",
     searchName: "GPT Image 2",
     displayName: "GPT Image 2",
+    providerName: "OpenAI",
     aliases: ["GPT Image 2", "OpenAI GPT Image 2", "GPT Image 2 OpenAI"],
     aspects: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"],
     resolution: "2k",
     qualities: ["high"],
+    mediaRole: "reference",
+    maximumImages: 4,
   },
 ] as const;
 const REQUIRED_TOOLS = [
@@ -169,10 +175,14 @@ function searchModelMatches(
   target: (typeof MODEL_TARGETS)[number],
   candidate: SearchModel,
 ): boolean {
-  return (
-    (!candidate.outputType || candidate.outputType.toLowerCase() === "image") &&
-    modelNameMatches(target, candidate.name, candidate.providerName)
-  );
+  return modelNameMatches(target, candidate.name, candidate.providerName);
+}
+
+function modelProviderMatches(
+  target: (typeof MODEL_TARGETS)[number],
+  providerName: string,
+): boolean {
+  return normalizeName(providerName) === normalizeName(target.providerName);
 }
 
 function stableJson(value: unknown): string {
@@ -595,7 +605,13 @@ function productInputMappings(input: {
       ? optionOwners(input.parameters, input.target.qualities)
       : new Set<string>();
   if (!aspectRatioParameter || !resolutionOwners || resolutionOwners.size !== 1) return null;
-  if (!qualityOwners || qualityOwners.size > 1 || !input.media.role) return null;
+  if (
+    !qualityOwners ||
+    qualityOwners.size > 1 ||
+    input.media.role !== input.target.mediaRole ||
+    (input.media.maximumImages ?? 0) < input.target.maximumImages
+  )
+    return null;
   const resolutionParameter = [...resolutionOwners][0]!;
   const qualityParameter = qualityOwners.size === 1 ? [...qualityOwners][0]! : undefined;
   const semanticParameters = new Set([
@@ -616,11 +632,11 @@ function productInputMappings(input: {
     return null;
   const schemaMedia = toolMediaContract(input.generateTool, input.media.role);
   const maximumImages = Math.min(
-    input.media.maximumImages ?? 16,
+    input.target.maximumImages,
+    input.media.maximumImages ?? 0,
     schemaMedia?.maximumImages ?? 0,
-    16,
   );
-  if (!schemaMedia || maximumImages < 1) return null;
+  if (!schemaMedia || maximumImages !== input.target.maximumImages) return null;
   return {
     aspectRatioParameter,
     resolutionParameter,
@@ -636,17 +652,10 @@ function modelIdentity(target: (typeof MODEL_TARGETS)[number]) {
 
 function buildModelProfile(input: {
   target: (typeof MODEL_TARGETS)[number];
-  candidates: SearchModel[];
+  candidate: SearchModel;
   detail?: Record<string, unknown>;
   generateTool?: DiscoveredTool;
 }): DiscoveredModelProfile {
-  const exact = input.candidates.filter((candidate) => searchModelMatches(input.target, candidate));
-  if (exact.length === 0) {
-    return { ...modelIdentity(input.target), available: false, reason: "model_missing" };
-  }
-  if (exact.length !== 1) {
-    return { ...modelIdentity(input.target), available: false, reason: "model_ambiguous" };
-  }
   if (!input.detail) {
     return { ...modelIdentity(input.target), available: false, reason: "profile_invalid" };
   }
@@ -655,14 +664,16 @@ function buildModelProfile(input: {
   }
   const id = safeId(input.detail.id ?? input.detail.model_id);
   const name = safeText(input.detail.name ?? input.detail.display_name, 240);
-  const providerName = safeText(input.detail.provider_name, 240) ?? exact[0]!.providerName;
-  const outputType = safeText(input.detail.output_type, 40) ?? exact[0]!.outputType;
+  const providerName = safeText(input.detail.provider_name, 240);
+  const outputType = safeText(input.detail.output_type, 40);
   if (
     !id ||
-    id !== exact[0]!.id ||
+    id !== input.candidate.id ||
     !name ||
+    !providerName ||
+    !modelProviderMatches(input.target, providerName) ||
     !modelNameMatches(input.target, name, providerName) ||
-    (outputType !== undefined && outputType.toLowerCase() !== "image")
+    outputType?.toLowerCase() !== "image"
   ) {
     return { ...modelIdentity(input.target), available: false, reason: "profile_invalid" };
   }
@@ -817,11 +828,27 @@ export async function inspectHiggsfieldProvider(input: {
           ) ?? undefined,
       ),
     );
-    const detail = exact.length === 1 ? details[0] : undefined;
     const discoveryIncomplete = listedModels !== undefined && !modelListComplete;
-    const profile = discoveryIncomplete
-      ? { ...modelIdentity(target), available: false as const, reason: "model_ambiguous" as const }
-      : buildModelProfile({ target, candidates: exact, detail, generateTool });
+    let profile: DiscoveredModelProfile;
+    if (discoveryIncomplete) {
+      profile = { ...modelIdentity(target), available: false, reason: "model_ambiguous" };
+    } else if (exact.length === 0) {
+      profile = { ...modelIdentity(target), available: false, reason: "model_missing" };
+    } else {
+      const executable = exact
+        .map((candidate, index) =>
+          buildModelProfile({ target, candidate, detail: details[index], generateTool }),
+        )
+        .filter((candidate) => candidate.available);
+      profile =
+        executable.length === 1
+          ? executable[0]!
+          : {
+              ...modelIdentity(target),
+              available: false,
+              reason: executable.length > 1 ? "model_ambiguous" : "profile_invalid",
+            };
+    }
     models.push(
       requiredToolsReady
         ? profile
