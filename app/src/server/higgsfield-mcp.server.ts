@@ -438,8 +438,10 @@ function nextModelPage(value: unknown): { nextPageToken?: string; valid: boolean
   return token && token.trim() ? { nextPageToken: token, valid: true } : { valid: false };
 }
 
-function detailRecord(value: unknown, expectedId: string): Record<string, unknown> | null {
-  const content = structuredContent(value);
+function detailRecordFromContent(
+  content: Record<string, unknown>,
+  expectedId: string,
+): Record<string, unknown> | null {
   const directId = safeId(content.id ?? content.model_id);
   if (directId === expectedId) return content;
   const arrays = [content.items, content.models, content.results, content.data].filter(
@@ -450,6 +452,20 @@ function detailRecord(value: unknown, expectedId: string): Record<string, unknow
       isRecord(item) && safeId(item.id ?? item.model_id) === expectedId,
   );
   return matching.length === 1 ? matching[0]! : null;
+}
+
+function observedDetailRecord(content: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (
+    Object.hasOwn(content, "id") ||
+    Object.hasOwn(content, "model_id") ||
+    Object.hasOwn(content, "job_set_type")
+  ) {
+    return content;
+  }
+  const arrays = [content.items, content.models, content.results, content.data].filter(
+    Array.isArray,
+  );
+  return (arrays[0] ?? []).find(isRecord);
 }
 
 function parameterOptions(
@@ -739,9 +755,212 @@ function buildModelProfile(input: {
   };
 }
 
+type ModelProfileRejectionCode =
+  | "canonical_detail_missing"
+  | "canonical_identity_mismatch"
+  | "provider_conflict"
+  | "output_conflict"
+  | "parameter_contract_missing"
+  | "aspect_mapping_invalid"
+  | "quality_2k_mapping_invalid"
+  | "media_contract_invalid"
+  | "generate_schema_incompatible";
+
+function safeDiagnosticText(value: unknown, max = 160): string | undefined {
+  const text = safeText(value, max) ?? undefined;
+  if (
+    !text ||
+    /(?:https?|wss?):\/\/|(?:data|blob):|\b(?:authorization|bearer|cookie|secret|token)\b/iu.test(
+      text,
+    )
+  ) {
+    return undefined;
+  }
+  return text;
+}
+
+function safeDiagnosticId(value: unknown): string | undefined {
+  const id = safeId(value) ?? undefined;
+  return id && safeDiagnosticText(id, 160) ? id : undefined;
+}
+
+function diagnoseSoulProfileRejection(input: {
+  target: (typeof MODEL_TARGETS)[number];
+  observedDetail?: Record<string, unknown>;
+  canonicalDetail?: Record<string, unknown>;
+  generateTool?: DiscoveredTool;
+}): ModelProfileRejectionCode {
+  if (!input.observedDetail) return "canonical_detail_missing";
+  const hasIdentity = ["id", "model_id", "job_set_type"].some((key) =>
+    Object.hasOwn(input.observedDetail!, key),
+  );
+  if (!hasIdentity) return "canonical_detail_missing";
+  if (
+    !input.canonicalDetail ||
+    safeId(input.canonicalDetail.id ?? input.canonicalDetail.model_id) !==
+      input.target.canonicalJobSetType
+  ) {
+    return "canonical_identity_mismatch";
+  }
+  const providerName = safeText(input.canonicalDetail.provider_name, 240) ?? undefined;
+  if (providerName !== undefined && !modelProviderMatches(input.target, providerName)) {
+    return "provider_conflict";
+  }
+  const outputType = safeText(input.canonicalDetail.output_type, 40) ?? undefined;
+  if (outputType !== undefined && normalizeName(outputType) !== "image") {
+    return "output_conflict";
+  }
+  const parameters = parameterOptions(input.canonicalDetail);
+  if (!Array.isArray(input.canonicalDetail.parameters) || Object.keys(parameters).length === 0) {
+    return "parameter_contract_missing";
+  }
+  const aspectRatios = Array.isArray(input.canonicalDetail.aspect_ratios)
+    ? input.canonicalDetail.aspect_ratios
+        .map((value) => safeText(value, 32))
+        .filter((value): value is string => Boolean(value))
+    : [];
+  const advertisedAspects = new Set(aspectRatios.map((value) => value.toLowerCase()));
+  const aspectOwners = optionOwners(parameters, input.target.aspects);
+  const aspectRatioParameter =
+    aspectOwners?.size === 1
+      ? [...aspectOwners][0]!
+      : input.generateTool
+        ? toolAspectParameter(input.generateTool)
+        : null;
+  if (
+    !input.target.aspects.every((value) => advertisedAspects.has(value.toLowerCase())) ||
+    !aspectRatioParameter
+  ) {
+    return "aspect_mapping_invalid";
+  }
+  const resolutionOwners = optionOwners(parameters, [input.target.resolution]);
+  if (
+    !resolutionOwners ||
+    resolutionOwners.size !== 1 ||
+    [...resolutionOwners][0] === aspectRatioParameter
+  ) {
+    return "quality_2k_mapping_invalid";
+  }
+  const media = mediaContract(input.canonicalDetail);
+  if (
+    !media.role ||
+    (media.maximumImages !== undefined && media.maximumImages < input.target.maximumImages)
+  ) {
+    return "media_contract_invalid";
+  }
+  if (
+    !input.generateTool ||
+    !toolContractValid(input.generateTool) ||
+    !toolMediaContract(input.generateTool, media.role) ||
+    !productInputMappings({
+      target: input.target,
+      parameters,
+      aspectRatios,
+      media,
+      generateTool: input.generateTool,
+    })
+  ) {
+    return "generate_schema_incompatible";
+  }
+  return "generate_schema_incompatible";
+}
+
+function diagnosticIdentityField(detail: Record<string, unknown> | undefined, key: string) {
+  const present = Boolean(detail && Object.hasOwn(detail, key));
+  const value = present ? safeDiagnosticId(detail?.[key]) : undefined;
+  return { present, ...(value ? { value } : {}) };
+}
+
+function diagnosticParameters(detail: Record<string, unknown> | undefined) {
+  if (!Array.isArray(detail?.parameters)) return [];
+  return detail.parameters.slice(0, 24).flatMap((parameter) => {
+    if (!isRecord(parameter)) return [];
+    const name = safeDiagnosticText(parameter.name, 96);
+    if (!name) return [];
+    const values = Array.isArray(parameter.options)
+      ? parameter.options
+      : Array.isArray(parameter.enum)
+        ? parameter.enum
+        : [];
+    const enumValues: Array<string | number | boolean> = [];
+    for (const value of values.slice(0, 32)) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        enumValues.push(value);
+        continue;
+      }
+      if (typeof value === "boolean") {
+        enumValues.push(value);
+        continue;
+      }
+      const text = safeDiagnosticText(value, 96);
+      if (text !== undefined) enumValues.push(text);
+    }
+    return [{ name, enumValues }];
+  });
+}
+
+function diagnosticMedia(detail: Record<string, unknown> | undefined) {
+  if (!Array.isArray(detail?.medias)) return [];
+  return detail.medias.slice(0, 8).flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const roles = Array.isArray(entry.roles)
+      ? entry.roles
+          .slice(0, 8)
+          .flatMap((role) => (safeDiagnosticText(role, 96) ? [safeDiagnosticText(role, 96)!] : []))
+      : [];
+    const maximum =
+      Number.isSafeInteger(entry.max) && Number(entry.max) >= 0 && Number(entry.max) <= 10_000
+        ? Number(entry.max)
+        : undefined;
+    return [{ roles, ...(maximum !== undefined ? { max: maximum } : {}) }];
+  });
+}
+
+function logSoulProfileDiagnostic(input: {
+  target: (typeof MODEL_TARGETS)[number];
+  rejectionCode: ModelProfileRejectionCode;
+  observedDetail?: Record<string, unknown>;
+  fallbackCandidates: SearchModel[];
+  write: (line: string) => void;
+}): void {
+  const detail = input.observedDetail;
+  const aspectRatios = Array.isArray(detail?.aspect_ratios)
+    ? detail.aspect_ratios
+        .slice(0, 16)
+        .flatMap((value) => (safeDiagnosticText(value, 32) ? [safeDiagnosticText(value, 32)!] : []))
+    : [];
+  const fallbackCandidates = input.fallbackCandidates.slice(0, 5).map((candidate) => ({
+    id: safeDiagnosticId(candidate.id) ?? null,
+    name: safeDiagnosticText(candidate.name) ?? null,
+    jobSetType: safeDiagnosticId(candidate.raw.job_set_type) ?? null,
+    providerName: safeDiagnosticText(candidate.providerName) ?? null,
+    outputType: safeDiagnosticText(candidate.outputType, 40) ?? null,
+  }));
+  input.write(
+    stableJson({
+      targetKey: input.target.key,
+      canonicalJobType: input.target.canonicalJobSetType,
+      rejectionCode: input.rejectionCode,
+      responseIdentity: {
+        id: diagnosticIdentityField(detail, "id"),
+        modelId: diagnosticIdentityField(detail, "model_id"),
+        jobSetType: diagnosticIdentityField(detail, "job_set_type"),
+      },
+      name: safeDiagnosticText(detail?.name ?? detail?.display_name) ?? null,
+      providerName: safeDiagnosticText(detail?.provider_name) ?? null,
+      outputType: safeDiagnosticText(detail?.output_type, 40) ?? null,
+      parameters: diagnosticParameters(detail),
+      aspectRatios,
+      media: diagnosticMedia(detail),
+      fallbackCandidates,
+    }),
+  );
+}
+
 export async function inspectHiggsfieldProvider(input: {
   listTools: (cursor?: string) => Promise<{ tools: unknown[]; nextCursor?: string }>;
   callTool: (name: "models_explore", args: Record<string, unknown>) => Promise<unknown>;
+  logDiagnostic?: (line: string) => void;
   now?: number;
 }): Promise<HiggsfieldCapabilityRecord> {
   const tools: DiscoveredTool[] = [];
@@ -811,15 +1030,17 @@ export async function inspectHiggsfieldProvider(input: {
       raw: {},
     };
     let canonicalDetail: Record<string, unknown> | undefined;
+    let canonicalObservedDetail: Record<string, unknown> | undefined;
     try {
+      const canonicalContent = structuredContent(
+        await input.callTool("models_explore", {
+          action: "get",
+          model_id: target.canonicalJobSetType,
+        }),
+      );
+      canonicalObservedDetail = observedDetailRecord(canonicalContent);
       canonicalDetail =
-        detailRecord(
-          await input.callTool("models_explore", {
-            action: "get",
-            model_id: target.canonicalJobSetType,
-          }),
-          target.canonicalJobSetType,
-        ) ?? undefined;
+        detailRecordFromContent(canonicalContent, target.canonicalJobSetType) ?? undefined;
     } catch (error) {
       if (
         !(error instanceof HiggsfieldMcpError) ||
@@ -836,6 +1057,7 @@ export async function inspectHiggsfieldProvider(input: {
       generateTool,
     });
 
+    const fallbackCandidates: SearchModel[] = [];
     if (!profile.available) {
       // Alias discovery remains bounded diagnostics only. A failed canonical lookup must never
       // promote a similarly named provider model into the executable profile.
@@ -848,6 +1070,7 @@ export async function inspectHiggsfieldProvider(input: {
           limit: 20,
         });
         let candidates = modelItems(strictSearch);
+        fallbackCandidates.push(...candidates.slice(0, 5));
         let exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
         if (exact.length === 0) {
           const relaxedSearch = await input.callTool("models_explore", {
@@ -857,9 +1080,27 @@ export async function inspectHiggsfieldProvider(input: {
             limit: 20,
           });
           candidates = modelItems(relaxedSearch);
+          for (const candidate of candidates) {
+            if (
+              fallbackCandidates.length < 5 &&
+              !fallbackCandidates.some((existing) => existing.id === candidate.id)
+            ) {
+              fallbackCandidates.push(candidate);
+            }
+          }
           exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
         }
-        if (exact.length === 0) await listModels();
+        if (exact.length === 0) {
+          candidates = await listModels();
+          for (const candidate of candidates) {
+            if (
+              fallbackCandidates.length < 5 &&
+              !fallbackCandidates.some((existing) => existing.id === candidate.id)
+            ) {
+              fallbackCandidates.push(candidate);
+            }
+          }
+        }
       } catch (error) {
         if (
           !(error instanceof HiggsfieldMcpError) ||
@@ -870,11 +1111,28 @@ export async function inspectHiggsfieldProvider(input: {
         // Canonical readiness already failed closed; provider diagnostics must not change it.
       }
     }
-    models.push(
-      requiredToolsReady
-        ? profile
-        : { ...modelIdentity(target), available: false, reason: "tool_contract_invalid" },
-    );
+    const resolvedProfile: DiscoveredModelProfile = requiredToolsReady
+      ? profile
+      : { ...modelIdentity(target), available: false, reason: "tool_contract_invalid" };
+    if (
+      input.logDiagnostic &&
+      target.key === "soul_2" &&
+      resolvedProfile.reason === "profile_invalid"
+    ) {
+      logSoulProfileDiagnostic({
+        target,
+        rejectionCode: diagnoseSoulProfileRejection({
+          target,
+          observedDetail: canonicalObservedDetail,
+          canonicalDetail,
+          generateTool,
+        }),
+        observedDetail: canonicalObservedDetail,
+        fallbackCandidates,
+        write: input.logDiagnostic,
+      });
+    }
+    models.push(resolvedProfile);
   }
   const now = input.now ?? Date.now();
   return {
@@ -898,6 +1156,7 @@ async function runOfficialInspection(input: {
     operation: async (client, signal) =>
       inspectHiggsfieldProvider({
         now: input.now,
+        logDiagnostic: (line) => console.warn(line),
         listTools: async (cursor) => {
           const result = await client.listTools(cursor ? { cursor } : undefined, {
             signal,

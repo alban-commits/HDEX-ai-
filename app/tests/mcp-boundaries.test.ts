@@ -165,6 +165,41 @@ function canonicalDetail(name: "Soul 2" | "GPT Image 2"): Record<string, unknown
   };
 }
 
+async function rejectedSoulDiagnostic(input: {
+  soulContent: Record<string, unknown>;
+  discoveredTools?: typeof tools;
+  fallbackModels?: Array<Record<string, unknown>>;
+}) {
+  const lines: string[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const record = await inspectHiggsfieldProvider({
+    now: NOW,
+    listTools: async () => ({ tools: input.discoveredTools ?? tools }),
+    logDiagnostic: (line) => lines.push(line),
+    callTool: async (name, args) => {
+      calls.push({ name, args });
+      if (args.action === "get") {
+        return {
+          structuredContent:
+            args.model_id === "text2image_soul_v2"
+              ? input.soulContent
+              : canonicalDetail("GPT Image 2"),
+        };
+      }
+      if (args.action === "search" && String(args.query).includes("Soul")) {
+        return { structuredContent: { models: input.fallbackModels ?? [] } };
+      }
+      return { structuredContent: { models: [] } };
+    },
+  });
+  return {
+    calls,
+    record,
+    lines,
+    diagnostic: JSON.parse(lines[0] ?? "{}") as Record<string, unknown>,
+  };
+}
+
 async function discoveredRecord(): Promise<{
   record: HiggsfieldCapabilityRecord;
   calls: Array<{ name: string; args: Record<string, unknown> }>;
@@ -333,6 +368,191 @@ describe("Higgsfield MCP discovery boundary", () => {
     });
     expect(record.models[1]).toMatchObject({ available: true });
     expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
+  });
+
+  test("emits one bounded Soul diagnostic for every profile rejection stage", async () => {
+    const aspects = ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"];
+    const schemaIncompatibleTools = structuredClone(tools);
+    const generate = schemaIncompatibleTools.find((tool) => tool.name === "generate_image")!;
+    generate.inputSchema.properties.params.anyOf[0].properties.medias.items.properties.role.enum = [
+      "reference",
+    ];
+    generate.inputSchema.properties.params.anyOf[1].properties.medias.items.properties.role.enum = [
+      "reference",
+    ];
+    const cases: Array<{
+      code: string;
+      soulContent: Record<string, unknown>;
+      discoveredTools?: typeof tools;
+    }> = [
+      { code: "canonical_detail_missing", soulContent: {} },
+      {
+        code: "canonical_identity_mismatch",
+        soulContent: { ...canonicalDetail("Soul 2"), id: "runtime/not-canonical" },
+      },
+      {
+        code: "provider_conflict",
+        soulContent: { ...canonicalDetail("Soul 2"), provider_name: "Different Provider" },
+      },
+      {
+        code: "output_conflict",
+        soulContent: { ...canonicalDetail("Soul 2"), output_type: "video" },
+      },
+      {
+        code: "parameter_contract_missing",
+        soulContent: { ...canonicalDetail("Soul 2"), parameters: [] },
+      },
+      {
+        code: "aspect_mapping_invalid",
+        soulContent: { ...canonicalDetail("Soul 2"), aspect_ratios: aspects.slice(0, 5) },
+      },
+      {
+        code: "quality_2k_mapping_invalid",
+        soulContent: {
+          ...canonicalDetail("Soul 2"),
+          parameters: [
+            { name: "aspect_ratio", options: aspects },
+            { name: "quality", options: ["1.5k"] },
+          ],
+        },
+      },
+      {
+        code: "media_contract_invalid",
+        soulContent: { ...canonicalDetail("Soul 2"), medias: [{ roles: ["reference"], max: 0 }] },
+      },
+      {
+        code: "generate_schema_incompatible",
+        soulContent: {
+          ...canonicalDetail("Soul 2"),
+          medias: [{ roles: ["soul-reference"], max: 1 }],
+        },
+        discoveredTools: schemaIncompatibleTools,
+      },
+    ];
+
+    for (const item of cases) {
+      const result = await rejectedSoulDiagnostic(item);
+      expect(result.lines).toHaveLength(1);
+      expect(result.diagnostic.rejectionCode).toBe(item.code);
+      expect(result.diagnostic.targetKey).toBe("soul_2");
+      expect(result.diagnostic.canonicalJobType).toBe("text2image_soul_v2");
+      expect(result.record.models[0]).toMatchObject({
+        available: false,
+        reason: "profile_invalid",
+      });
+      expect(result.record.models[1]).toMatchObject({
+        available: true,
+        modelId: "gpt_image_2",
+      });
+      expect(new Set(result.calls.map((call) => call.name))).toEqual(
+        new Set(["models_explore"]),
+      );
+      expect(result.calls.some((call) => call.args.action === "generate_image")).toBe(false);
+    }
+  });
+
+  test("logs only allowlisted bounded metadata and keeps diagnostics out of browser summary", async () => {
+    const soul = canonicalDetail("Soul 2");
+    soul.medias = [{ roles: ["reference", "mask"], max: 1, media_id: "private-media-id" }];
+    soul.parameters = [
+      {
+        name: "quality",
+        options: ["2k", "secret-access-token", "https://signed.example/result"],
+      },
+    ];
+    Object.assign(soul, {
+      access_token: "secret-access-token",
+      refresh_token: "secret-refresh-token",
+      cookie: "private-cookie",
+      authorization: "Bearer private-authorization",
+      url: "https://signed.example/result",
+      prompt: "private prompt",
+      raw_response: { forbidden: true },
+    });
+    const fallbackModels = Array.from({ length: 7 }, (_, index) => ({
+      id: `runtime/soul-${index}`,
+      name: `Soul ${index}`,
+      job_set_type: `runtime_soul_${index}`,
+      provider_name: "Higgsfield",
+      output_type: "image",
+      access_token: "fallback-secret-token",
+      url: "https://signed.example/fallback",
+    }));
+    const result = await rejectedSoulDiagnostic({ soulContent: soul, fallbackModels });
+    expect(result.lines).toHaveLength(1);
+    expect(Object.keys(result.diagnostic).sort()).toEqual(
+      [
+        "aspectRatios",
+        "canonicalJobType",
+        "fallbackCandidates",
+        "media",
+        "name",
+        "outputType",
+        "parameters",
+        "providerName",
+        "rejectionCode",
+        "responseIdentity",
+        "targetKey",
+      ].sort(),
+    );
+    expect(result.diagnostic.rejectionCode).toBe("media_contract_invalid");
+    expect(result.diagnostic.responseIdentity).toEqual({
+      id: { present: true, value: "text2image_soul_v2" },
+      modelId: { present: false },
+      jobSetType: { present: false },
+    });
+    expect(result.diagnostic.fallbackCandidates).toHaveLength(5);
+    const serializedDiagnostic = result.lines[0]!;
+    expect(serializedDiagnostic).not.toContain("\n");
+    for (const forbidden of [
+      "secret-access-token",
+      "secret-refresh-token",
+      "private-cookie",
+      "private-authorization",
+      "https://",
+      "private-media-id",
+      "private prompt",
+      "raw_response",
+    ]) {
+      expect(serializedDiagnostic).not.toContain(forbidden);
+    }
+
+    const fingerprint = "diagnostic-summary-session";
+    await inspectHiggsfieldCapabilities({
+      sessionFingerprint: fingerprint,
+      mcpUrl: session.resource,
+      accessToken: session.accessToken,
+      now: NOW,
+      runner: async () => result.record,
+    });
+    const summary = JSON.stringify(getHiggsfieldCapabilitySummary(fingerprint, NOW));
+    expect(summary).toContain("profile_invalid");
+    expect(summary).not.toContain("rejectionCode");
+    expect(summary).not.toContain("fallbackCandidates");
+    expect(summary).not.toContain("text2image_soul_v2");
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("does not emit a profile diagnostic when the public reason is tool_contract_invalid", async () => {
+    const lines: string[] = [];
+    const record = await inspectHiggsfieldProvider({
+      now: NOW,
+      listTools: async () => ({ tools, nextCursor: "incomplete-tools" }),
+      logDiagnostic: (line) => lines.push(line),
+      callTool: async (_name, args) => ({
+        structuredContent:
+          args.action === "get"
+            ? args.model_id === "text2image_soul_v2"
+              ? {}
+              : canonicalDetail("GPT Image 2")
+            : { models: [] },
+      }),
+    });
+    expect(record.models[0]).toMatchObject({
+      available: false,
+      reason: "tool_contract_invalid",
+    });
+    expect(lines).toHaveLength(0);
   });
 
   test("rejects explicit search and detail provider or output conflicts", async () => {
