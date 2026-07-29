@@ -15,6 +15,7 @@ export const HIGGSFIELD_CAPABILITY_TTL_MS = 24 * 60 * 60 * 1_000;
 const MODEL_TARGETS = [
   {
     key: "soul_2",
+    canonicalJobSetType: "text2image_soul_v2",
     searchName: "Higgsfield Soul V2",
     displayName: "Soul 2",
     providerName: "Higgsfield",
@@ -22,11 +23,11 @@ const MODEL_TARGETS = [
     aspects: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"],
     resolution: "2k",
     qualities: [],
-    mediaRole: "reference",
     maximumImages: 1,
   },
   {
     key: "gpt_image_2",
+    canonicalJobSetType: "gpt_image_2",
     searchName: "GPT Image 2",
     displayName: "GPT Image 2",
     providerName: "OpenAI",
@@ -34,7 +35,6 @@ const MODEL_TARGETS = [
     aspects: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"],
     resolution: "2k",
     qualities: ["high"],
-    mediaRole: "reference",
     maximumImages: 4,
   },
 ] as const;
@@ -175,7 +175,10 @@ function searchModelMatches(
   target: (typeof MODEL_TARGETS)[number],
   candidate: SearchModel,
 ): boolean {
-  return modelNameMatches(target, candidate.name, candidate.providerName);
+  return (
+    candidate.id === target.canonicalJobSetType ||
+    modelNameMatches(target, candidate.name, candidate.providerName)
+  );
 }
 
 function modelProviderMatches(
@@ -608,8 +611,9 @@ function productInputMappings(input: {
   if (
     !qualityOwners ||
     qualityOwners.size > 1 ||
-    input.media.role !== input.target.mediaRole ||
-    (input.media.maximumImages ?? 0) < input.target.maximumImages
+    !input.media.role ||
+    (input.media.maximumImages !== undefined &&
+      input.media.maximumImages < input.target.maximumImages)
   )
     return null;
   const resolutionParameter = [...resolutionOwners][0]!;
@@ -633,7 +637,7 @@ function productInputMappings(input: {
   const schemaMedia = toolMediaContract(input.generateTool, input.media.role);
   const maximumImages = Math.min(
     input.target.maximumImages,
-    input.media.maximumImages ?? 0,
+    input.media.maximumImages ?? input.target.maximumImages,
     schemaMedia?.maximumImages ?? 0,
   );
   if (!schemaMedia || maximumImages !== input.target.maximumImages) return null;
@@ -663,17 +667,30 @@ function buildModelProfile(input: {
     return { ...modelIdentity(input.target), available: false, reason: "tool_contract_invalid" };
   }
   const id = safeId(input.detail.id ?? input.detail.model_id);
-  const name = safeText(input.detail.name ?? input.detail.display_name, 240);
-  const providerName = safeText(input.detail.provider_name, 240);
-  const outputType = safeText(input.detail.output_type, 40);
+  const detailName = safeText(input.detail.name ?? input.detail.display_name, 240);
+  const detailProviderName = safeText(input.detail.provider_name, 240) ?? undefined;
+  const detailOutputType = safeText(input.detail.output_type, 40) ?? undefined;
+  const providerConflict =
+    input.candidate.providerName &&
+    detailProviderName &&
+    normalizeName(input.candidate.providerName) !== normalizeName(detailProviderName);
+  const outputConflict =
+    input.candidate.outputType &&
+    detailOutputType &&
+    normalizeName(input.candidate.outputType) !== normalizeName(detailOutputType);
+  const providerName = detailProviderName ?? input.candidate.providerName;
+  const outputType = detailOutputType ?? input.candidate.outputType;
+  const canonicalIdentity = id === input.target.canonicalJobSetType;
+  const name = detailName ?? input.candidate.name;
   if (
     !id ||
     id !== input.candidate.id ||
-    !name ||
-    !providerName ||
-    !modelProviderMatches(input.target, providerName) ||
-    !modelNameMatches(input.target, name, providerName) ||
-    outputType?.toLowerCase() !== "image"
+    providerConflict ||
+    outputConflict ||
+    (providerName !== undefined && !modelProviderMatches(input.target, providerName)) ||
+    (outputType !== undefined && normalizeName(outputType) !== "image") ||
+    (!canonicalIdentity &&
+      (!providerName || !outputType || !modelNameMatches(input.target, name, providerName)))
   ) {
     return { ...modelIdentity(input.target), available: false, reason: "profile_invalid" };
   }
@@ -816,6 +833,8 @@ export async function inspectHiggsfieldProvider(input: {
       exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
     }
     exact = [...new Map(exact.map((candidate) => [candidate.id, candidate])).values()];
+    const canonical = exact.filter((candidate) => candidate.id === target.canonicalJobSetType);
+    if (canonical.length > 0) exact = canonical;
     const details = await Promise.all(
       exact.map(
         async (candidate) =>

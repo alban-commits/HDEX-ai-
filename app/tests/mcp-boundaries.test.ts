@@ -158,6 +158,13 @@ function soulDetail(id: string) {
   return { ...structuredClone(detail("Soul 2")), id };
 }
 
+function canonicalDetail(name: "Soul 2" | "GPT Image 2"): Record<string, unknown> {
+  return {
+    ...structuredClone(detail(name)),
+    id: name === "Soul 2" ? "text2image_soul_v2" : "gpt_image_2",
+  };
+}
+
 async function discoveredRecord(): Promise<{
   record: HiggsfieldCapabilityRecord;
   calls: Array<{ name: string; args: Record<string, unknown> }>;
@@ -240,6 +247,161 @@ describe("Higgsfield MCP discovery boundary", () => {
     ]);
     expect(calls.some((call) => call.name === ("generate_image" as string))).toBe(false);
     expect(calls.filter((call) => call.args.action === "get")).toHaveLength(2);
+  });
+
+  test("accepts canonical GPT Image 2 when detail metadata and media max are omitted", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const gpt = canonicalDetail("GPT Image 2");
+    delete gpt.provider_name;
+    delete gpt.output_type;
+    gpt.parameters = [
+      { name: "aspect_ratio", options: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"] },
+      { name: "resolution", options: ["1k", "2k", "4k"] },
+      { name: "quality", options: ["low", "medium", "high"] },
+    ];
+    gpt.medias = [{ roles: ["provider_image_reference"] }];
+    const record = await inspectHiggsfieldProvider({
+      now: NOW,
+      listTools: async () => ({ tools }),
+      callTool: async (name, args) => {
+        calls.push({ name, args });
+        if (args.action === "search") {
+          const soul = String(args.query).includes("Soul");
+          return {
+            structuredContent: {
+              models: [
+                soul
+                  ? { id: "text2image_soul_v2", name: "Higgsfield Soul V2" }
+                  : { id: "gpt_image_2", name: "GPT Image 2" },
+              ],
+            },
+          };
+        }
+        return {
+          structuredContent:
+            args.model_id === "text2image_soul_v2" ? canonicalDetail("Soul 2") : gpt,
+        };
+      },
+    });
+    expect(record.models[0]).toMatchObject({ available: true });
+    expect(record.models[1]).toMatchObject({
+      available: true,
+      modelId: "gpt_image_2",
+      mediaRole: "provider_image_reference",
+      maximumImages: 4,
+      resolutionValue: "2k",
+      qualityValue: "high",
+    });
+    expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
+  });
+
+  test("accepts canonical Soul V2 with unique 2k and single-image execution contract", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const soul = canonicalDetail("Soul 2");
+    soul.medias = [{ roles: ["provider_image_reference"], max: 1 }];
+    const record = await inspectHiggsfieldProvider({
+      now: NOW,
+      listTools: async () => ({ tools }),
+      callTool: async (name, args) => {
+        calls.push({ name, args });
+        if (args.action === "search") {
+          const isSoul = String(args.query).includes("Soul");
+          return {
+            structuredContent: {
+              models: [
+                isSoul
+                  ? { id: "text2image_soul_v2", name: "Higgsfield Soul V2" }
+                  : { id: "gpt_image_2", name: "GPT Image 2" },
+              ],
+            },
+          };
+        }
+        return {
+          structuredContent: args.model_id === "text2image_soul_v2" ? soul : canonicalDetail("GPT Image 2"),
+        };
+      },
+    });
+    expect(record.models[0]).toMatchObject({
+      available: true,
+      modelId: "text2image_soul_v2",
+      mediaRole: "provider_image_reference",
+      maximumImages: 1,
+      resolutionParameter: "quality",
+      resolutionValue: "2k",
+    });
+    expect(record.models[1]).toMatchObject({ available: true });
+    expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
+  });
+
+  test("rejects explicit search and detail provider or output conflicts", async () => {
+    for (const conflicting of [
+      { provider_name: "Different Provider", output_type: "image" },
+      { provider_name: "OpenAI", output_type: "video" },
+    ]) {
+      const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+      const record = await inspectHiggsfieldProvider({
+        now: NOW,
+        listTools: async () => ({ tools }),
+        callTool: async (name, args) => {
+          calls.push({ name, args });
+          if (args.action === "search") {
+            const soul = String(args.query).includes("Soul");
+            return {
+              structuredContent: {
+                models: [
+                  soul
+                    ? { id: "text2image_soul_v2", name: "Higgsfield Soul V2" }
+                    : {
+                        id: "gpt_image_2",
+                        name: "GPT Image 2",
+                        provider_name: "OpenAI",
+                        output_type: "image",
+                      },
+                ],
+              },
+            };
+          }
+          return {
+            structuredContent:
+              args.model_id === "text2image_soul_v2"
+                ? canonicalDetail("Soul 2")
+                : { ...canonicalDetail("GPT Image 2"), ...conflicting },
+          };
+        },
+      });
+      expect(record.models[0]).toMatchObject({ available: true });
+      expect(record.models[1]).toMatchObject({ available: false, reason: "profile_invalid" });
+      expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
+    }
+  });
+
+  test("rejects an explicit provider media max below the app limit", async () => {
+    const gpt = canonicalDetail("GPT Image 2");
+    gpt.medias = [{ roles: ["provider_image_reference"], max: 3 }];
+    const record = await inspectHiggsfieldProvider({
+      now: NOW,
+      listTools: async () => ({ tools }),
+      callTool: async (_name, args) => {
+        if (args.action === "search") {
+          const soul = String(args.query).includes("Soul");
+          return {
+            structuredContent: {
+              models: [
+                soul
+                  ? { id: "text2image_soul_v2", name: "Higgsfield Soul V2" }
+                  : { id: "gpt_image_2", name: "GPT Image 2" },
+              ],
+            },
+          };
+        }
+        return {
+          structuredContent:
+            args.model_id === "text2image_soul_v2" ? canonicalDetail("Soul 2") : gpt,
+        };
+      },
+    });
+    expect(record.models[0]).toMatchObject({ available: true });
+    expect(record.models[1]).toMatchObject({ available: false, reason: "profile_invalid" });
   });
 
   test("accepts executable generate_image params oneOf branches without repeated common fields", async () => {
@@ -529,7 +691,7 @@ describe("Higgsfield MCP discovery boundary", () => {
         }
         if (args.model_id === "runtime/soul-invalid") {
           const invalid = soulDetail("runtime/soul-invalid");
-          invalid.medias = [{ roles: ["mask"], max: 1 }];
+          invalid.medias = [{ roles: ["mask"], max: 0 }];
           return { structuredContent: invalid };
         }
         return { structuredContent: detail("GPT Image 2") };
