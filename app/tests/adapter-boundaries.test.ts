@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { ApiJobError } from "@higgsfield/fnf/errors";
+import {
+  HDEX_ADAPTER_BODY_SENTINEL_KEY,
+  HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+} from "../src/lib/app-api-contract";
 import { finalizeNodeResponse, normalizeCatastrophicResponse } from "../src/server";
 import { handleHiggsfieldAdapter } from "../src/server/higgsfield-adapter-route.server";
 import { higgsfieldOAuthSessionFingerprint } from "../src/server/higgsfield-oauth.server";
@@ -83,10 +87,12 @@ describe("Higgsfield adapter JSON boundary", () => {
       requireActiveOAuthSession: async () => null,
       logDiagnostic: (line) => diagnostics.push(line),
     });
-    expect(await expectSafeJson(response, 401)).toMatchObject({
+    const body = await expectSafeJson(response, 401);
+    expect(body).toMatchObject({
       ok: false,
       error: { code: "oauth_required", data: { reconnectRequired: true } },
     });
+    expect(body[HDEX_ADAPTER_BODY_SENTINEL_KEY]).toBe(HDEX_ADAPTER_BODY_SENTINEL_VALUE);
     expect(diagnostics.map((line) => JSON.parse(line))).toEqual([
       {
         event: "higgsfield_adapter_response",

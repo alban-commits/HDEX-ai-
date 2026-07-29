@@ -435,6 +435,27 @@ function strongerRejectionClass(
   return rank[candidate] > rank[current] ? candidate : current;
 }
 
+function jsonObjectCandidatesFromText(text: string): Record<string, unknown>[] {
+  const trimmed = text.trim();
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return isRecord(parsed) ? [parsed] : [];
+  } catch {
+    // A provider may wrap its one JSON object in a markdown JSON code fence.
+  }
+  const candidates: Record<string, unknown>[] = [];
+  const fencePattern = /```json[ \t]*\r?\n([\s\S]*?)```/gi;
+  for (const match of text.matchAll(fencePattern)) {
+    try {
+      const parsed = JSON.parse(match[1]!.trim()) as unknown;
+      if (isRecord(parsed)) candidates.push(parsed);
+    } catch {
+      // Invalid fences are not interpreted as partial provider records.
+    }
+  }
+  return candidates;
+}
+
 export function parseHiggsfieldMcpContent(
   value: unknown,
   options: { strictText?: boolean; allowPlainTextError?: boolean } = {},
@@ -468,42 +489,40 @@ export function parseHiggsfieldMcpContent(
     throw new HiggsfieldMcpContentError("invalid_response", "malformed");
   }
   let totalTextBytes = 0;
-  let plainTextCount = 0;
+  let textCount = 0;
   let plainTextRejectionClass: HiggsfieldMcpRejectionClass = "unknown";
   if (Array.isArray(value.content)) {
     for (const item of value.content) {
       if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
       const text = item.text;
+      textCount += 1;
       totalTextBytes += Buffer.byteLength(text);
       if (totalTextBytes > HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) {
         throw new HiggsfieldMcpContentError("response_limit", "oversized");
       }
-      try {
-        const parsed = JSON.parse(text) as unknown;
-        if (isRecord(parsed)) {
-          candidates.push(parsed);
-          continue;
-        }
-      } catch {
-        if (
-          options.allowPlainTextError &&
-          value.isError === true &&
-          !["{", "["].some((prefix) => text.trimStart().startsWith(prefix))
-        ) {
-          plainTextCount += 1;
-          plainTextRejectionClass = strongerRejectionClass(
-            plainTextRejectionClass,
-            classifyHiggsfieldProviderRejection(text),
-          );
-          continue;
-        }
+      const textCandidates = jsonObjectCandidatesFromText(text);
+      candidates.push(...textCandidates);
+      if (candidates.length > 16) {
+        throw new HiggsfieldMcpContentError("invalid_response", "ambiguous");
       }
-      if (options.strictText) {
-        throw new HiggsfieldMcpContentError("invalid_response", "malformed");
+      if (
+        textCandidates.length === 0 &&
+        options.allowPlainTextError &&
+        value.isError === true
+      ) {
+        plainTextRejectionClass = strongerRejectionClass(
+          plainTextRejectionClass,
+          classifyHiggsfieldProviderRejection(text),
+        );
       }
     }
   }
-  if (candidates.length === 0 && plainTextCount > 0) {
+  if (
+    candidates.length === 0 &&
+    textCount > 0 &&
+    options.allowPlainTextError &&
+    value.isError === true
+  ) {
     return {
       content: {},
       isError: true,
@@ -512,10 +531,10 @@ export function parseHiggsfieldMcpContent(
     };
   }
   if (candidates.length === 0) {
-    throw new HiggsfieldMcpContentError("invalid_response", "missing");
-  }
-  if (plainTextCount > 0) {
-    throw new HiggsfieldMcpContentError("invalid_response", "ambiguous");
+    throw new HiggsfieldMcpContentError(
+      "invalid_response",
+      options.strictText && textCount > 0 ? "malformed" : "missing",
+    );
   }
   try {
     const firstSerialized = JSON.stringify(candidates[0]);

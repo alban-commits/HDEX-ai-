@@ -1,4 +1,9 @@
 import { errorFromJSON } from "@higgsfield/fnf/errors";
+import {
+  HDEX_ADAPTER_BODY_SENTINEL_KEY,
+  HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+  HDEX_ADAPTER_MAX_JSON_BYTES,
+} from "./app-api-contract";
 
 const APP_RESPONSE_HEADER = "X-HDEX-API-Response";
 
@@ -31,6 +36,59 @@ function normalizedContentType(response: Response): {
       ? mediaType.slice(0, 100)
       : "invalid",
   };
+}
+
+const INVALID_BOUNDED_JSON = Symbol("invalid_bounded_json");
+
+async function readBoundedJson(response: Response): Promise<unknown> {
+  const declared = response.headers.get("content-length");
+  if (
+    declared !== null &&
+    (!/^\d+$/.test(declared) || Number(declared) > HDEX_ADAPTER_MAX_JSON_BYTES)
+  ) {
+    return INVALID_BOUNDED_JSON;
+  }
+  if (!response.body) return INVALID_BOUNDED_JSON;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      total += chunk.value.byteLength;
+      if (total > HDEX_ADAPTER_MAX_JSON_BYTES) {
+        await reader.cancel();
+        return INVALID_BOUNDED_JSON;
+      }
+      chunks.push(chunk.value);
+    }
+  } catch {
+    return INVALID_BOUNDED_JSON;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
+  } catch {
+    return INVALID_BOUNDED_JSON;
+  }
+}
+
+function hasAdapterBodySentinel(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>)[HDEX_ADAPTER_BODY_SENTINEL_KEY] ===
+      HDEX_ADAPTER_BODY_SENTINEL_VALUE
+  );
 }
 
 function throwSafeResponseError(input: {
@@ -67,6 +125,7 @@ export async function fetchAppJson<T>(input: {
   path: string;
   init: RequestInit;
   isEnvelope: (value: unknown, status: number) => value is T;
+  allowHeaderlessAdapterError?: boolean;
 }): Promise<T> {
   const headers = new Headers(input.init.headers);
   headers.set("Accept", "application/json");
@@ -97,7 +156,24 @@ export async function fetchAppJson<T>(input: {
       stage: "access_redirect",
     });
   }
-  if (response.headers.get(APP_RESPONSE_HEADER) !== "1") {
+  const appHeaderMatches = response.headers.get(APP_RESPONSE_HEADER) === "1";
+  const contentTypeIsJson = normalizedContentType(response).value === "application/json";
+  if (!appHeaderMatches) {
+    if (
+      input.allowHeaderlessAdapterError &&
+      response.status >= 400 &&
+      response.status < 600 &&
+      contentTypeIsJson
+    ) {
+      const fallbackValue = await readBoundedJson(response);
+      if (
+        fallbackValue !== INVALID_BOUNDED_JSON &&
+        hasAdapterBodySentinel(fallbackValue) &&
+        input.isEnvelope(fallbackValue, response.status)
+      ) {
+        return fallbackValue;
+      }
+    }
     throwSafeResponseError({
       code: "adapter_non_app_response",
       message: "앱 서버 응답을 확인할 수 없습니다.",
@@ -105,7 +181,7 @@ export async function fetchAppJson<T>(input: {
       stage: "app_header_missing",
     });
   }
-  if (normalizedContentType(response).value !== "application/json") {
+  if (!contentTypeIsJson) {
     throwSafeResponseError({
       code: "adapter_invalid_json_response",
       message: "서버 API 응답을 확인하지 못했습니다.",

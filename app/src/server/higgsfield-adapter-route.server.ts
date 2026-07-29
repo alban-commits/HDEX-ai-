@@ -1,5 +1,10 @@
 import { ApiJobError } from "@higgsfield/fnf/errors";
 import {
+  HDEX_ADAPTER_BODY_SENTINEL_KEY,
+  HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+  HDEX_ADAPTER_MAX_JSON_BYTES,
+} from "../lib/app-api-contract";
+import {
   createHiggsfieldGeneration,
   getHiggsfieldGeneration,
   listHiggsfieldGenerations,
@@ -23,7 +28,6 @@ import {
   isHiggsfieldAuthenticationFailure,
 } from "./higgsfield-reconnect.server";
 
-const MAX_JSON_BYTES = 256 * 1024;
 const ADAPTER_OPERATIONS = new Set([
   "createJobs",
   "getJob",
@@ -42,11 +46,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 async function readInput(request: Request): Promise<Record<string, unknown>> {
   const declared = request.headers.get("content-length");
-  if (declared && Number(declared) > MAX_JSON_BYTES) {
+  if (declared && Number(declared) > HDEX_ADAPTER_MAX_JSON_BYTES) {
     throw new ApiJobError("request_too_large", "요청 크기 제한을 초과했습니다.", { status: 413 });
   }
   const text = await request.text();
-  if (Buffer.byteLength(text) > MAX_JSON_BYTES) {
+  if (Buffer.byteLength(text) > HDEX_ADAPTER_MAX_JSON_BYTES) {
     throw new ApiJobError("request_too_large", "요청 크기 제한을 초과했습니다.", { status: 413 });
   }
   let parsed: unknown;
@@ -89,7 +93,13 @@ export async function handleHiggsfieldAdapter(
         ...(generationDiagnostic ?? {}),
       }),
     );
-    return jsonNoStore(value, { status, headers });
+    const body = isRecord(value)
+      ? {
+          ...value,
+          [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+        }
+      : value;
+    return jsonNoStore(body, { status, headers });
   };
   try {
     const active = await (options.requireActiveOAuthSession ?? requireActiveOAuthSession)(request);

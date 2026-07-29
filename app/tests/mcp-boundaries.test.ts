@@ -979,6 +979,116 @@ describe("Higgsfield MCP discovery boundary", () => {
     clearHiggsfieldRuntime(fingerprint);
   });
 
+  test("selects one structured or JSON record while ignoring explanatory text", async () => {
+    const cases = [
+      {
+        name: "structured-explanation",
+        providerJobId: "provider-structured-explanation-1",
+        responseShape: "structured",
+        response: {
+          structuredContent: {
+            results: [
+              {
+                id: "provider-structured-explanation-1",
+                model: "soul_v2",
+                status: "queued",
+              },
+            ],
+          },
+          content: [{ type: "text", text: "The generation request was accepted." }],
+        },
+      },
+      {
+        name: "json-explanation",
+        providerJobId: "provider-json-explanation-1",
+        responseShape: "json_text",
+        response: {
+          content: [
+            { type: "text", text: "The generation request was accepted." },
+            {
+              type: "text",
+              text: JSON.stringify({
+                results: [
+                  {
+                    id: "provider-json-explanation-1",
+                    model: "soul_v2",
+                    status: "queued",
+                  },
+                ],
+              }),
+            },
+          ],
+        },
+      },
+      {
+        name: "fenced-json",
+        providerJobId: "provider-fenced-json-1",
+        responseShape: "json_text",
+        response: {
+          content: [
+            {
+              type: "text",
+              text: [
+                "The generation request was accepted:",
+                "```json",
+                JSON.stringify({
+                  results: [
+                    {
+                      id: "provider-fenced-json-1",
+                      model: "soul_v2",
+                      status: "queued",
+                    },
+                  ],
+                }),
+                "```",
+              ].join("\n"),
+            },
+          ],
+        },
+      },
+    ] as const;
+    for (const scenario of cases) {
+      const fingerprint = `generation-${scenario.name}-session`;
+      await seed(fingerprint);
+      let creates = 0;
+      const diagnostics: unknown[] = [];
+      const jobs = await createHiggsfieldGeneration({
+        fingerprint,
+        session,
+        jobSetType: "text2image_soul_v2",
+        params: {
+          prompt: "one person in a studio",
+          batch_size: 1,
+          aspect_ratio: "1:1",
+          quality: "1080p",
+          medias: [],
+        },
+        confirmationToken: `request-${scenario.name}-0001`,
+        env: GENERATION_ENV,
+        callTool: async () => {
+          creates += 1;
+          return scenario.response;
+        },
+        onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+        now: NOW,
+      });
+      expect(jobs).toEqual([
+        expect.objectContaining({ id: scenario.providerJobId, status: "queued" }),
+      ]);
+      expect(creates).toBe(1);
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          responseShape: scenario.responseShape,
+          parseFailure: "none",
+          resultCount: 1,
+          jobIdPresent: true,
+        }),
+      ]);
+      await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+      clearHiggsfieldRuntime(fingerprint);
+    }
+  });
+
   test("classifies an isError text content credit response without exposing provider text", async () => {
     const fingerprint = "generation-text-content-credit-session";
     await seed(fingerprint);
@@ -1102,10 +1212,16 @@ describe("Higgsfield MCP discovery boundary", () => {
       name: string;
       content: Array<{ type: "text"; text: string }>;
       parseFailure: "malformed" | "oversized" | "ambiguous";
+      structuredContent?: Record<string, unknown>;
     }> = [
       {
         name: "malformed",
         content: [{ type: "text", text: '{"results":' }],
+        parseFailure: "malformed",
+      },
+      {
+        name: "success-plain-text",
+        content: [{ type: "text", text: "The generation request completed successfully." }],
         parseFailure: "malformed",
       },
       {
@@ -1136,6 +1252,25 @@ describe("Higgsfield MCP discovery boundary", () => {
         ],
         parseFailure: "ambiguous",
       },
+      {
+        name: "structured-json-ambiguous",
+        structuredContent: {
+          results: [
+            { id: "provider-structured-candidate-1", model: "soul_v2", status: "queued" },
+          ],
+        },
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              results: [
+                { id: "provider-json-candidate-2", model: "soul_v2", status: "queued" },
+              ],
+            }),
+          },
+        ],
+        parseFailure: "ambiguous",
+      },
     ];
     for (const scenario of cases) {
       const fingerprint = `generation-text-${scenario.name}-session`;
@@ -1158,7 +1293,12 @@ describe("Higgsfield MCP discovery boundary", () => {
           env: GENERATION_ENV,
           callTool: async () => {
             creates += 1;
-            return { content: scenario.content };
+            return {
+              content: scenario.content,
+              ...(scenario.structuredContent
+                ? { structuredContent: scenario.structuredContent }
+                : {}),
+            };
           },
           onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
           now: NOW,

@@ -13,6 +13,11 @@ import {
   uploadAsset,
 } from "../src/lib/fnf.browser";
 import { composeInfluencerProfile } from "../src/lib/profile.browser";
+import {
+  HDEX_ADAPTER_BODY_SENTINEL_KEY,
+  HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+  HDEX_ADAPTER_MAX_JSON_BYTES,
+} from "../src/lib/app-api-contract";
 
 function appJson(value: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
@@ -203,7 +208,11 @@ test("distinguishes an Access redirect without following or exposing its URL", a
 
 test("rejects an unmarked JSON response before reading its body", async () => {
   const originalFetch = globalThis.fetch;
-  const response = Response.json({ ok: true, value: { private_token: "private-body" } });
+  const response = Response.json({
+    ok: true,
+    value: { private_token: "private-body" },
+    [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+  });
   globalThis.fetch = async () => response;
   try {
     const thrown = await caught(() => fnfBrowserAdapter.getUser());
@@ -219,6 +228,58 @@ test("rejects an unmarked JSON response before reading its body", async () => {
     });
     expect(response.bodyUsed).toBe(false);
     expect(JSON.stringify(thrown)).not.toContain("private-body");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("accepts only a bounded sentinel-marked adapter error without the response header", async () => {
+  const originalFetch = globalThis.fetch;
+  const valid = Response.json(
+    {
+      ok: false,
+      error: { code: "outcome_unknown", message: "생성 결과를 확인할 수 없습니다.", status: 502 },
+      [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+    },
+    { status: 502 },
+  );
+  const missingSentinel = Response.json(
+    {
+      ok: false,
+      error: { code: "private-error", message: "private response body", status: 502 },
+    },
+    { status: 502 },
+  );
+  const oversized = new Response(
+    JSON.stringify({
+      ok: false,
+      error: { code: "private-error", message: "x".repeat(HDEX_ADAPTER_MAX_JSON_BYTES) },
+      [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+    }),
+    { status: 502, headers: { "content-type": "application/json" } },
+  );
+  let index = 0;
+  globalThis.fetch = async () => [valid, missingSentinel, oversized][index++]!;
+  try {
+    const accepted = await caught(() => fnfBrowserAdapter.getUser());
+    expect(accepted).toMatchObject({ code: "outcome_unknown", status: 502 });
+
+    for (const response of [missingSentinel, oversized]) {
+      const rejected = await caught(() => fnfBrowserAdapter.getUser());
+      expect(rejected).toMatchObject({
+        code: "adapter_non_app_response",
+        data: {
+          httpStatus: 502,
+          contentType: "application/json",
+          appResponseHeaderMatches: false,
+          failureStage: "app_header_missing",
+        },
+      });
+      expect(JSON.stringify(rejected)).not.toContain("private response body");
+      expect(JSON.stringify(rejected)).not.toContain("private-error");
+      expect(JSON.stringify(rejected)).not.toContain("x".repeat(100));
+      expect(response.bodyUsed).toBe(true);
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
