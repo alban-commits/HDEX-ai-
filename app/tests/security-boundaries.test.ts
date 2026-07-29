@@ -3,6 +3,21 @@ import { applySecurityHeaders } from "../src/lib/security-headers.server";
 import { MAX_UPLOAD_BYTES, rejectUnsafeUploadRequest } from "../src/lib/upload-request-security";
 
 describe("response security headers", () => {
+  test("allows blob image previews without allowing blob scripts or connections", () => {
+    const response = applySecurityHeaders(new Response("ok"));
+    const policy = response.headers.get("content-security-policy") ?? "";
+    const directive = (name: string) =>
+      policy
+        .split(";")
+        .map((value) => value.trim())
+        .find((value) => value.startsWith(`${name} `))
+        ?.split(/\s+/);
+
+    expect(directive("img-src")).toContain("blob:");
+    expect(directive("script-src")).not.toContain("blob:");
+    expect(directive("connect-src")).not.toContain("blob:");
+  });
+
   test("does not allow third-party auth frames", () => {
     const response = applySecurityHeaders(new Response("ok"));
     expect(response.headers.get("content-security-policy")).toContain(
