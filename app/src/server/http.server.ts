@@ -76,11 +76,11 @@ export function redirectNoStore(location: string): Response {
 export function rejectCrossSiteMutation(request: Request, publicOrigin: string): Response | null {
   const fetchSite = request.headers.get("sec-fetch-site");
   if (fetchSite === "cross-site") {
-    return Response.json({ error: "invalid_origin" }, { status: 403, headers: NO_STORE_HEADERS });
+    return jsonNoStore({ error: "invalid_origin" }, { status: 403 });
   }
   const origin = request.headers.get("origin");
   if (origin && origin !== publicOrigin) {
-    return Response.json({ error: "invalid_origin" }, { status: 403, headers: NO_STORE_HEADERS });
+    return jsonNoStore({ error: "invalid_origin" }, { status: 403 });
   }
   return null;
 }

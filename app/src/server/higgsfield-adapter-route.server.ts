@@ -23,6 +23,17 @@ import {
 } from "./higgsfield-reconnect.server";
 
 const MAX_JSON_BYTES = 256 * 1024;
+const ADAPTER_OPERATIONS = new Set([
+  "createJobs",
+  "getJob",
+  "listJobs",
+  "estimateCost",
+  "getUser",
+  "listWorkspaces",
+  "getCurrentWorkspace",
+  "getWorkspaceWallet",
+  "switchWorkspace",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -53,6 +64,7 @@ async function readInput(request: Request): Promise<Record<string, unknown>> {
 
 type AdapterRouteOptions = {
   requireActiveOAuthSession?: (request: Request) => Promise<ActiveOAuthSession | null>;
+  logDiagnostic?: (line: string) => void;
 };
 
 export async function handleHiggsfieldAdapter(
@@ -61,11 +73,25 @@ export async function handleHiggsfieldAdapter(
 ): Promise<Response> {
   const headers = new Headers(NO_STORE_HEADERS);
   let fingerprint: string | undefined;
+  let operationName: string | null = null;
+  const respond = (value: unknown, status: number, errorCode: string): Response => {
+    const safeErrorCode = /^[a-z0-9_]{1,64}$/.test(errorCode) ? errorCode : "unexpected";
+    (options.logDiagnostic ?? console.info)(
+      JSON.stringify({
+        event: "higgsfield_adapter_response",
+        routeReached: true,
+        operation: operationName,
+        status,
+        errorCode: safeErrorCode,
+      }),
+    );
+    return jsonNoStore(value, { status, headers });
+  };
   try {
     const active = await (options.requireActiveOAuthSession ?? requireActiveOAuthSession)(request);
     if (!active) {
       clearAllOAuthCookies(headers);
-      return jsonNoStore(
+      return respond(
         {
           ok: false,
           error: {
@@ -74,12 +100,13 @@ export async function handleHiggsfieldAdapter(
             data: { reconnectRequired: true },
           },
         },
-        { status: 401, headers },
+        401,
+        "oauth_required",
       );
     }
     const crossSite = rejectCrossSiteMutation(request, active.config.publicOrigin);
     if (crossSite) {
-      return jsonNoStore(
+      return respond(
         {
           ok: false,
           error: {
@@ -88,13 +115,16 @@ export async function handleHiggsfieldAdapter(
             status: crossSite.status,
           },
         },
-        { status: crossSite.status, headers },
+        crossSite.status,
+        "invalid_origin",
       );
     }
     if (active.rotatedCookies) appendOAuthSessionCookies(headers, active.rotatedCookies);
     fingerprint = higgsfieldOAuthSessionFingerprint(active.session);
     const input = await readInput(request);
     const operation = input.operation;
+    operationName =
+      typeof operation === "string" && ADAPTER_OPERATIONS.has(operation) ? operation : null;
     const data = isRecord(input.data) ? input.data : {};
     let value: unknown;
     switch (operation) {
@@ -165,7 +195,7 @@ export async function handleHiggsfieldAdapter(
           status: 405,
         });
     }
-    return jsonNoStore({ ok: true, value }, { headers });
+    return respond({ ok: true, value }, 200, "ok");
   } catch (error) {
     if (isHiggsfieldAuthenticationFailure(error)) {
       if (fingerprint) {
@@ -177,7 +207,7 @@ export async function handleHiggsfieldAdapter(
       } else {
         clearAllOAuthCookies(headers);
       }
-      return jsonNoStore(
+      return respond(
         {
           ok: false,
           error: {
@@ -187,7 +217,8 @@ export async function handleHiggsfieldAdapter(
             data: { reconnectRequired: true },
           },
         },
-        { status: 401, headers },
+        401,
+        "oauth_required",
       );
     }
     const payload =
@@ -200,9 +231,11 @@ export async function handleHiggsfieldAdapter(
               status: 502,
             }
           : { code: "unexpected", message: "서버 연결 요청을 처리하지 못했습니다." };
-    return jsonNoStore(
+    const status = payload.status ?? 500;
+    return respond(
       { ok: false, error: payload },
-      { status: payload.status ?? 500, headers },
+      status,
+      payload.code,
     );
   }
 }

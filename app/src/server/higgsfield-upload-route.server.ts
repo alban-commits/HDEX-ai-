@@ -6,7 +6,7 @@ import {
   clearAllOAuthCookies,
   requireActiveOAuthSession,
 } from "./oauth-routes.server";
-import { NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
+import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-request-security";
 import {
   getHiggsfieldCapabilityRecord,
@@ -25,7 +25,7 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
   if (!active) {
     const headers = new Headers(NO_STORE_HEADERS);
     clearAllOAuthCookies(headers);
-    return Response.json(
+    return jsonNoStore(
       {
         ok: false,
         error: {
@@ -88,11 +88,11 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
           bytes: new Uint8Array(await readFile(temporaryPath)),
         }),
     });
-    return Response.json({ ok: true, ref }, { headers });
+    return jsonNoStore({ ok: true, ref }, { headers });
   } catch (error) {
     if (isHiggsfieldAuthenticationFailure(error)) {
       await invalidateHiggsfieldAuthentication({ headers, sessionFingerprint: fingerprint });
-      return Response.json(
+      return jsonNoStore(
         {
           ok: false,
           error: {
@@ -109,6 +109,9 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
       error instanceof ApiJobError
         ? error.toJSON()
         : { code: "upload_failed", message: "이미지 업로드를 완료하지 못했습니다." };
-    return Response.json({ ok: false, error: payload }, { status: payload.status ?? 500, headers });
+    return jsonNoStore(
+      { ok: false, error: payload },
+      { status: payload.status ?? 500, headers },
+    );
   }
 }

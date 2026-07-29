@@ -12,6 +12,22 @@ import {
   subscribeHiggsfieldReconnect,
   uploadAsset,
 } from "../src/lib/fnf.browser";
+import { composeInfluencerProfile } from "../src/lib/profile.browser";
+
+function appJson(value: unknown, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("X-HDEX-API-Response", "1");
+  return Response.json(value, { ...init, headers });
+}
+
+async function caught(operation: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await operation();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("expected operation to fail");
+}
 
 test("detects auth through the same-origin user route", async () => {
   const originalFetch = globalThis.fetch;
@@ -63,7 +79,11 @@ test("normalizes uploaded image refs before they reach generation input", async 
     expect(input).toBe("/api/media/upload");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeInstanceOf(FormData);
-    return Response.json({
+    expect(init?.redirect).toBe("manual");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("accept")).toBe("application/json");
+    expect(headers.get("content-type")).toBeNull();
+    return appJson({
       ok: true,
       ref: {
         id: "97cf1fec-77a9-4627-a3d4-23a09ea8aaa4",
@@ -96,7 +116,7 @@ test("notifies the existing sign-in flow when an adapter response requires OAuth
     notifications += 1;
   });
   globalThis.fetch = async () =>
-    Response.json(
+    appJson(
       {
         ok: false,
         error: {
@@ -112,6 +132,20 @@ test("notifies the existing sign-in flow when an adapter response requires OAuth
     expect(notifications).toBe(1);
   } finally {
     unsubscribe();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("accepts a valid marked adapter envelope", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    appJson({ ok: true, value: { id: "higgsfield-oauth", workspace_id: "personal" } });
+  try {
+    expect(await fnfBrowserAdapter.getUser()).toEqual({
+      id: "higgsfield-oauth",
+      workspace_id: "personal",
+    });
+  } finally {
     globalThis.fetch = originalFetch;
   }
 });
@@ -167,50 +201,187 @@ test("distinguishes an Access redirect without following or exposing its URL", a
   }
 });
 
-test("normalizes an app non-JSON response without reading or exposing its HTML", async () => {
+test("rejects an unmarked JSON response before reading its body", async () => {
   const originalFetch = globalThis.fetch;
-  const html = "<!doctype html><p>private-token private-cookie</p>";
-  const response = new Response(html, {
-    status: 500,
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+  const response = Response.json({ ok: true, value: { private_token: "private-body" } });
   globalThis.fetch = async () => response;
   try {
-    let thrown: unknown;
-    try {
-      await fnfBrowserAdapter.getUser();
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toMatchObject({ code: "adapter_non_json_response" });
-    expect(thrown).not.toBeInstanceOf(SyntaxError);
+    const thrown = await caught(() => fnfBrowserAdapter.getUser());
+    expect(thrown).toMatchObject({
+      code: "adapter_non_app_response",
+      data: {
+        httpStatus: 200,
+        contentTypePresent: true,
+        contentType: "application/json",
+        appResponseHeaderMatches: false,
+        failureStage: "app_header_missing",
+      },
+    });
     expect(response.bodyUsed).toBe(false);
-    expect(JSON.stringify(thrown)).not.toContain("private-token");
-    expect(JSON.stringify(thrown)).not.toContain("private-cookie");
-    expect(JSON.stringify(thrown)).not.toContain("<!doctype html>");
+    expect(JSON.stringify(thrown)).not.toContain("private-body");
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("normalizes malformed JSON without exposing the parser or response body", async () => {
+test("separates marked malformed JSON from an invalid marked envelope", async () => {
+  const originalFetch = globalThis.fetch;
+  const malformed = new Response('{"private_token":', {
+    status: 500,
+    headers: {
+      "content-type": "application/json",
+      "X-HDEX-API-Response": "1",
+    },
+  });
+  const invalidEnvelope = appJson(
+    { ok: "not-boolean", private_token: "private-envelope" },
+    { status: 500 },
+  );
+  let index = 0;
+  globalThis.fetch = async () => [malformed, invalidEnvelope][index++]!;
+  try {
+    const malformedError = await caught(() => fnfBrowserAdapter.getUser());
+    expect(malformedError).toMatchObject({
+      code: "adapter_invalid_json_response",
+      data: {
+        appResponseHeaderMatches: true,
+        failureStage: "json_parse_failed",
+      },
+    });
+    expect(malformedError).not.toBeInstanceOf(SyntaxError);
+    expect(JSON.stringify(malformedError)).not.toContain("private_token");
+
+    const contractError = await caught(() => fnfBrowserAdapter.getUser());
+    expect(contractError).toMatchObject({
+      code: "adapter_response_contract_invalid",
+      data: {
+        appResponseHeaderMatches: true,
+        failureStage: "envelope_contract_invalid",
+      },
+    });
+    expect(JSON.stringify(contractError)).not.toContain("private-envelope");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects marked HTML without reading or exposing its body", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = new Response("<!doctype html><p>private-token private-cookie</p>", {
+      status: 500,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "X-HDEX-API-Response": "1",
+      },
+  });
+  globalThis.fetch = async () => response;
+  try {
+    const thrown = await caught(() => fnfBrowserAdapter.getUser());
+    expect(thrown).toMatchObject({
+      code: "adapter_invalid_json_response",
+      data: { contentType: "text/html", failureStage: "content_type_invalid" },
+    });
+    expect(response.bodyUsed).toBe(false);
+    expect(JSON.stringify(thrown)).not.toContain("private-token");
+    expect(JSON.stringify(thrown)).not.toContain("private-cookie");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("separates upload Access redirects and unmarked HTML without exposing either response", async () => {
+  const originalFetch = globalThis.fetch;
+  const responses = [
+    {
+      status: 0,
+      type: "opaqueredirect",
+      redirected: false,
+      url: "https://access.example/login?token=private-upload-query",
+      headers: new Headers(),
+      bodyUsed: false,
+    } as Response,
+    new Response("<!doctype html><p>private-upload-body</p>", {
+      status: 500,
+      headers: { "content-type": "text/html" },
+    }),
+  ];
+  let index = 0;
+  globalThis.fetch = async () => responses[index++]!;
+  try {
+    const accessError = await caught(() =>
+      uploadAsset(new File(["image"], "access.png", { type: "image/png" })),
+    );
+    expect(accessError).toMatchObject({ code: "access_session_required" });
+    expect(JSON.stringify(accessError)).not.toContain("private-upload-query");
+
+    const htmlError = await caught(() =>
+      uploadAsset(new File(["image"], "html.png", { type: "image/png" })),
+    );
+    expect(htmlError).toMatchObject({
+      code: "adapter_non_app_response",
+      data: { contentType: "text/html", appResponseHeaderMatches: false },
+    });
+    expect(responses[1]?.bodyUsed).toBe(false);
+    expect(JSON.stringify(htmlError)).not.toContain("private-upload-body");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("separates profile Access redirects and unmarked HTML without exposing FormData", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
-    new Response('{"private_token":', {
-      status: 500,
-      headers: { "content-type": "application/json" },
-    });
+    appJson({ ok: true, ref: { id: "profile-pose-media", type: "image" } });
   try {
-    let thrown: unknown;
-    try {
-      await fnfBrowserAdapter.getUser();
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toMatchObject({ code: "adapter_invalid_json_response" });
-    expect(thrown).not.toBeInstanceOf(SyntaxError);
-    expect(JSON.stringify(thrown)).not.toContain("private_token");
+    await uploadAsset(new File(["image"], "pose.png", { type: "image/png" }));
+    const input = {
+      data: {
+        gender: "female" as const,
+        environment: "studio",
+        scene: "standing",
+        imageType: "editorial",
+        poseMediaId: "profile-pose-media",
+        referenceImageUrls: [],
+      },
+    };
+    const responses = [
+      {
+        status: 0,
+        type: "opaqueredirect",
+        redirected: false,
+        url: "https://access.example/login?token=private-profile-query",
+        headers: new Headers(),
+        bodyUsed: false,
+      } as Response,
+      new Response("<!doctype html><p>private-profile-body</p>", {
+        status: 500,
+        headers: { "content-type": "text/html" },
+      }),
+    ];
+    let index = 0;
+    globalThis.fetch = async (path, init) => {
+      expect(path).toBe("/api/openai/profile");
+      expect(init?.redirect).toBe("manual");
+      expect(init?.body).toBeInstanceOf(FormData);
+      const headers = new Headers(init?.headers);
+      expect(headers.get("accept")).toBe("application/json");
+      expect(headers.get("content-type")).toBeNull();
+      return responses[index++]!;
+    };
+
+    const accessError = await caught(() => composeInfluencerProfile(input));
+    expect(accessError).toMatchObject({ code: "access_session_required" });
+    expect(JSON.stringify(accessError)).not.toContain("private-profile-query");
+
+    const htmlError = await caught(() => composeInfluencerProfile(input));
+    expect(htmlError).toMatchObject({
+      code: "adapter_non_app_response",
+      data: { contentType: "text/html", appResponseHeaderMatches: false },
+    });
+    expect(responses[1]?.bodyUsed).toBe(false);
+    expect(JSON.stringify(htmlError)).not.toContain("private-profile-body");
   } finally {
+    releaseAllLocalUploads();
     globalThis.fetch = originalFetch;
   }
 });
@@ -225,7 +396,7 @@ test("bounds and explicitly releases local upload object URLs", async () => {
   };
   globalThis.fetch = async () => {
     id += 1;
-    return Response.json({ ok: true, ref: { id: `bounded-media-${id}`, type: "image" } });
+    return appJson({ ok: true, ref: { id: `bounded-media-${id}`, type: "image" } });
   };
   try {
     for (let index = 0; index < 9; index += 1) {

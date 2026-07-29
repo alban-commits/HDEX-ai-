@@ -1,5 +1,5 @@
-import { errorFromJSON } from "@higgsfield/fnf/errors";
 import { getLocalUploadFile, notifyHiggsfieldReconnectRequired } from "./fnf.browser";
+import { fetchAppJson } from "./app-api-response.browser";
 
 type ProfileRequest = {
   gender: "male" | "female";
@@ -9,6 +9,20 @@ type ProfileRequest = {
   poseMediaId: string;
   referenceImageUrls: string[];
 };
+
+type ProfileResponse =
+  | { ok: true; profile: Record<string, unknown> }
+  | { ok: false; code: string; message: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isProfileResponse(value: unknown, status: number): value is ProfileResponse {
+  if (!isRecord(value) || typeof value.ok !== "boolean") return false;
+  if (value.ok) return status >= 200 && status < 300 && isRecord(value.profile);
+  return typeof value.code === "string" && typeof value.message === "string";
+}
 
 export async function composeInfluencerProfile(input: { data: ProfileRequest }) {
   const file = getLocalUploadFile(input.data.poseMediaId);
@@ -31,17 +45,17 @@ export async function composeInfluencerProfile(input: { data: ProfileRequest }) 
       referenceImageUrls: input.data.referenceImageUrls,
     }),
   );
-  const response = await fetch("/api/openai/profile", {
-    method: "POST",
-    credentials: "include",
-    body: form,
+  const body = await fetchAppJson<ProfileResponse>({
+    path: "/api/openai/profile",
+    init: {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    },
+    isEnvelope: isProfileResponse,
   });
-  const body = (await response.json()) as
-    { ok: true; profile: Record<string, unknown> } | { ok: false; code: string; message: string };
-  if (response.status === 401 || (!body.ok && body.code === "oauth_required")) {
+  if (!body.ok && body.code === "oauth_required") {
     notifyHiggsfieldReconnectRequired();
   }
-  if (!response.ok && body.ok)
-    throw errorFromJSON({ code: "openai_error", message: "Request failed" });
   return body;
 }

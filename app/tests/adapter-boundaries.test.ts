@@ -47,13 +47,24 @@ async function expectSafeJson(response: Response, status: number) {
 
 describe("Higgsfield adapter JSON boundary", () => {
   test("returns an unauthenticated adapter response as no-store JSON", async () => {
+    const diagnostics: string[] = [];
     const response = await handleHiggsfieldAdapter(adapterRequest("{}"), {
       requireActiveOAuthSession: async () => null,
+      logDiagnostic: (line) => diagnostics.push(line),
     });
     expect(await expectSafeJson(response, 401)).toMatchObject({
       ok: false,
       error: { code: "oauth_required", data: { reconnectRequired: true } },
     });
+    expect(diagnostics.map((line) => JSON.parse(line))).toEqual([
+      {
+        event: "higgsfield_adapter_response",
+        routeReached: true,
+        operation: null,
+        status: 401,
+        errorCode: "oauth_required",
+      },
+    ]);
   });
 
   test("returns generation disabled as JSON before invoking a provider", async () => {
@@ -95,6 +106,7 @@ describe("Higgsfield adapter JSON boundary", () => {
     });
     const previousGenerationEnabled = process.env.HDEX_GENERATION_ENABLED;
     process.env.HDEX_GENERATION_ENABLED = "false";
+    const diagnostics: string[] = [];
     try {
       const response = await handleHiggsfieldAdapter(
         adapterRequest(
@@ -113,7 +125,10 @@ describe("Higgsfield adapter JSON boundary", () => {
             },
           }),
         ),
-        { requireActiveOAuthSession: async () => activeSession },
+        {
+          requireActiveOAuthSession: async () => activeSession,
+          logDiagnostic: (line) => diagnostics.push(line),
+        },
       );
       const body = await expectSafeJson(response, 503);
       expect(body).toMatchObject({
@@ -124,6 +139,18 @@ describe("Higgsfield adapter JSON boundary", () => {
       expect(serialized).not.toContain("not transmitted");
       expect(serialized).not.toContain(activeSession.session.accessToken);
       expect(serialized).not.toContain(activeSession.session.refreshToken);
+      expect(diagnostics).toHaveLength(1);
+      expect(JSON.parse(diagnostics[0]!)).toEqual({
+        event: "higgsfield_adapter_response",
+        routeReached: true,
+        operation: "createJobs",
+        status: 503,
+        errorCode: "generation_disabled",
+      });
+      expect(diagnostics[0]).not.toContain("not transmitted");
+      expect(diagnostics[0]).not.toContain(activeSession.session.accessToken);
+      expect(diagnostics[0]).not.toContain(activeSession.session.refreshToken);
+      expect(diagnostics[0]).not.toContain("request-disabled-test");
     } finally {
       clearHiggsfieldRuntime(fingerprint);
       if (previousGenerationEnabled === undefined) {
@@ -135,8 +162,10 @@ describe("Higgsfield adapter JSON boundary", () => {
   });
 
   test("normalizes malformed JSON and unexpected route errors without leaking details", async () => {
+    const diagnostics: string[] = [];
     const malformed = await handleHiggsfieldAdapter(adapterRequest("{"), {
       requireActiveOAuthSession: async () => activeSession,
+      logDiagnostic: (line) => diagnostics.push(line),
     });
     expect(await expectSafeJson(malformed, 400)).toMatchObject({
       ok: false,
@@ -149,6 +178,7 @@ describe("Higgsfield adapter JSON boundary", () => {
           "private-token private-cookie https://internal.example/path?code=private-query",
         );
       },
+      logDiagnostic: (line) => diagnostics.push(line),
     });
     const serialized = JSON.stringify(await expectSafeJson(unexpected, 500));
     expect(serialized).toContain('"code":"unexpected"');
@@ -156,6 +186,25 @@ describe("Higgsfield adapter JSON boundary", () => {
     expect(serialized).not.toContain("private-cookie");
     expect(serialized).not.toContain("private-query");
     expect(serialized).not.toContain("internal.example");
+    expect(diagnostics.map((line) => JSON.parse(line))).toEqual([
+      {
+        event: "higgsfield_adapter_response",
+        routeReached: true,
+        operation: null,
+        status: 400,
+        errorCode: "validation",
+      },
+      {
+        event: "higgsfield_adapter_response",
+        routeReached: true,
+        operation: null,
+        status: 500,
+        errorCode: "unexpected",
+      },
+    ]);
+    expect(diagnostics.join("\n")).not.toContain("private-token");
+    expect(diagnostics.join("\n")).not.toContain("private-cookie");
+    expect(diagnostics.join("\n")).not.toContain("private-query");
   });
 });
 

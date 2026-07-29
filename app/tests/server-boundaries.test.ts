@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { composeInfluencerProfile } from "../src/lib/profile.functions";
 import { BASE_PROFILE } from "../src/data/base-profile";
 import { downloadResultThroughTemporaryFile } from "../src/server/result-download.server";
+import { handleHiggsfieldUpload } from "../src/server/higgsfield-upload-route.server";
 import { handleOpenAiProfile } from "../src/server/openai-profile-route.server";
 import { getRuntimeReadiness, getTemporaryStorageConfig } from "../src/server/runtime-config.server";
 import {
@@ -36,7 +37,23 @@ describe("server OpenAI image input boundary", () => {
       new Request("https://hdex-ai.company.example/api/openai/profile", { method: "POST" }),
     );
     expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-hdex-api-response")).toBe("1");
     expect(await response.json()).toMatchObject({ code: "oauth_required" });
+  });
+
+  test("marks an unauthenticated media upload as an app JSON response", async () => {
+    const response = await handleHiggsfieldUpload(
+      new Request("https://hdex-ai.company.example/api/media/upload", { method: "POST" }),
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-hdex-api-response")).toBe("1");
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      error: { code: "oauth_required" },
+    });
   });
 
   test("sends local references and the uploaded pose as bytes without exposing the internal URL", async () => {

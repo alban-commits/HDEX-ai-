@@ -3,6 +3,7 @@ import type { MediaRef } from "@higgsfield/fnf/media";
 import { errorFromJSON } from "@higgsfield/fnf/errors";
 import { gptImage2, soulV2Image } from "@higgsfield/fnf/jobs";
 import type { AssetSelection } from "@/components/asset-library";
+import { fetchAppJson } from "./app-api-response.browser";
 
 export const PRESET_JOBS = [soulV2Image, gptImage2] as const;
 
@@ -15,6 +16,29 @@ const reconnectListeners = new Set<ReconnectListener>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isApiError(value: unknown): value is {
+  code: string;
+  message: string;
+  status?: number;
+  data?: unknown;
+} {
+  return (
+    isRecord(value) &&
+    typeof value.code === "string" &&
+    typeof value.message === "string" &&
+    (value.status === undefined ||
+      (Number.isSafeInteger(value.status) && Number(value.status) >= 100 && Number(value.status) <= 599))
+  );
+}
+
+function isAdapterResponse(value: unknown, status: number): value is AdapterResponse {
+  if (!isRecord(value) || typeof value.ok !== "boolean") return false;
+  if (value.ok) {
+    return status >= 200 && status < 300 && Object.hasOwn(value, "value");
+  }
+  return isApiError(value.error);
 }
 
 function requiresReconnect(error: { code: string; data?: unknown }): boolean {
@@ -46,73 +70,16 @@ export function notifyHiggsfieldReconnectRequired(): void {
 }
 
 async function adapterCall(operation: string, data: object = {}): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await fetch("/api/higgsfield/adapter", {
+  const result = await fetchAppJson<AdapterResponse>({
+    path: "/api/higgsfield/adapter",
+    init: {
       method: "POST",
       credentials: "include",
-      redirect: "manual",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ operation, data }),
-    });
-  } catch {
-    throwAdapterError({
-      code: "adapter_request_failed",
-      message: "서버 연결 요청을 완료하지 못했습니다.",
-    });
-  }
-  if (
-    response.status === 0 ||
-    response.type === "opaqueredirect" ||
-    response.redirected ||
-    (response.status >= 300 && response.status < 400)
-  ) {
-    throwAdapterError({
-      code: "access_session_required",
-      message: "사내 접근 세션을 확인해 주세요.",
-      status: response.status || undefined,
-    });
-  }
-  const successfulStatus = response.status >= 200 && response.status < 300;
-  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType !== "application/json") {
-    throwAdapterError({
-      code: "adapter_non_json_response",
-      message: "서버가 올바른 API 응답을 반환하지 않았습니다.",
-      status: response.status || undefined,
-    });
-  }
-  let result: AdapterResponse;
-  try {
-    result = (await response.json()) as AdapterResponse;
-  } catch {
-    throwAdapterError({
-      code: "adapter_invalid_json_response",
-      message: "서버 API 응답을 확인하지 못했습니다.",
-      status: response.status || undefined,
-    });
-  }
-  if (
-    !isRecord(result) ||
-    typeof result.ok !== "boolean" ||
-    (result.ok === false &&
-      (!isRecord(result.error) ||
-        typeof result.error.code !== "string" ||
-        typeof result.error.message !== "string"))
-  ) {
-    throwAdapterError({
-      code: "adapter_invalid_json_response",
-      message: "서버 API 응답을 확인하지 못했습니다.",
-      status: response.status || undefined,
-    });
-  }
-  if (result.ok && !successfulStatus) {
-    throwAdapterError({
-      code: "adapter_http_error",
-      message: "서버 API 요청이 실패했습니다.",
-      status: response.status,
-    });
-  }
+    },
+    isEnvelope: isAdapterResponse,
+  });
   if (!result.ok) throwAdapterError(result.error);
   return result.value;
 }
@@ -174,6 +141,18 @@ type UploadResponse =
   | { ok: true; ref: MediaRef }
   | { ok: false; error: { code: string; message: string; status?: number; data?: unknown } };
 
+function isUploadResponse(value: unknown, status: number): value is UploadResponse {
+  if (!isRecord(value) || typeof value.ok !== "boolean") return false;
+  if (!value.ok) return isApiError(value.error);
+  return (
+    status >= 200 &&
+    status < 300 &&
+    isRecord(value.ref) &&
+    typeof value.ref.id === "string" &&
+    typeof value.ref.type === "string"
+  );
+}
+
 const MAX_LOCAL_UPLOADS = 8;
 const localUploadFiles = new Map<string, { file: File; objectUrl: string }>();
 
@@ -205,8 +184,11 @@ function rememberLocalUpload(mediaId: string, file: File, objectUrl: string): vo
 export async function uploadAsset(file: File): Promise<AssetSelection> {
   const form = new FormData();
   form.set("file", file);
-  const response = await fetch("/api/media/upload", { method: "POST", body: form });
-  const body = (await response.json()) as UploadResponse;
+  const body = await fetchAppJson<UploadResponse>({
+    path: "/api/media/upload",
+    init: { method: "POST", credentials: "include", body: form },
+    isEnvelope: isUploadResponse,
+  });
   if (!body.ok) throwAdapterError(body.error);
   const objectUrl = URL.createObjectURL(file);
   rememberLocalUpload(body.ref.id, file, objectUrl);

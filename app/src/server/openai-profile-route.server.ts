@@ -7,7 +7,7 @@ import {
   clearAllOAuthCookies,
   requireActiveOAuthSession,
 } from "./oauth-routes.server";
-import { NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
+import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
 import { validateImageBytes } from "./image-validation.server";
 
 const profileInput = z.object({
@@ -23,7 +23,7 @@ export async function handleOpenAiProfile(request: Request): Promise<Response> {
   if (!active) {
     const headers = new Headers(NO_STORE_HEADERS);
     clearAllOAuthCookies(headers);
-    return Response.json(
+    return jsonNoStore(
       {
         ok: false,
         code: "oauth_required",
@@ -39,7 +39,7 @@ export async function handleOpenAiProfile(request: Request): Promise<Response> {
   try {
     const declared = request.headers.get("content-length");
     if (declared && Number(declared) > MAX_UPLOAD_BYTES + 64 * 1024) {
-      return Response.json(
+      return jsonNoStore(
         { ok: false, code: "file_too_large", message: "이미지는 20MB 이하여야 합니다." },
         { status: 413, headers },
       );
@@ -71,9 +71,9 @@ export async function handleOpenAiProfile(request: Request): Promise<Response> {
       publicOrigin: active.config.publicOrigin,
       publicDirectory: resolve(process.cwd(), "public"),
     });
-    return Response.json(result, { status: result.ok ? 200 : 502, headers });
+    return jsonNoStore(result, { status: result.ok ? 200 : 502, headers });
   } catch {
-    return Response.json(
+    return jsonNoStore(
       { ok: false, code: "invalid_input", message: "입력 이미지를 확인해 주세요." },
       { status: 400, headers },
     );
