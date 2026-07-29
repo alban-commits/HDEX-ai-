@@ -215,6 +215,7 @@ describe("Higgsfield adapter JSON boundary", () => {
               responseShape: "plain_text_error",
               rejectionClass: "validation",
               parseFailure: "none",
+              modelLineage: "conflict",
             });
             throw new ApiJobError(
               "outcome_unknown",
@@ -247,6 +248,7 @@ describe("Higgsfield adapter JSON boundary", () => {
         responseShape: "plain_text_error",
         rejectionClass: "validation",
         parseFailure: "none",
+        modelLineage: "conflict",
       });
       expect(diagnostics[0]).not.toContain("private prompt");
       expect(diagnostics[0]).not.toContain("private-request-id");

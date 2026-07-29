@@ -203,6 +203,14 @@ export async function handleHiggsfieldAdapter(
               ].includes(diagnostic.parseFailure)
                 ? diagnostic.parseFailure
                 : "missing",
+              modelLineage: [
+                "provider_model",
+                "public_job_type",
+                "omitted",
+                "conflict",
+              ].includes(diagnostic.modelLineage)
+                ? diagnostic.modelLineage
+                : "conflict",
             };
           },
         });

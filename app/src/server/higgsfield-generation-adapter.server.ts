@@ -52,6 +52,7 @@ export type HiggsfieldGenerationDiagnostic = {
   responseShape: HiggsfieldMcpResponseShape;
   rejectionClass: HiggsfieldMcpRejectionClass;
   parseFailure: HiggsfieldMcpParseFailure;
+  modelLineage: "provider_model" | "public_job_type" | "omitted" | "conflict";
 };
 
 type GenerationFlightOutcome = {
@@ -335,6 +336,7 @@ async function parseAndPersistCreatedJobs(
   content: Record<string, unknown>,
   expectedModelId: string,
   expectedCount: number,
+  responseShape: HiggsfieldMcpResponseShape,
   persistence: {
     fingerprint: string;
     requestId: string;
@@ -345,7 +347,10 @@ async function parseAndPersistCreatedJobs(
     expiresAt: number;
     isCurrent: () => boolean;
   },
-): Promise<StoredGenerationJob[]> {
+): Promise<{
+  jobs: StoredGenerationJob[];
+  modelLineage: HiggsfieldGenerationDiagnostic["modelLineage"];
+}> {
   const results = Array.isArray(content.results) ? content.results : [];
   const candidates: Array<{
     result: Record<string, unknown>;
@@ -356,6 +361,7 @@ async function parseAndPersistCreatedJobs(
   let invalid = !Array.isArray(content.results) || results.length !== expectedCount;
   let modelMismatch = false;
   let nonModelInvalid = invalid;
+  let modelLineage: HiggsfieldGenerationDiagnostic["modelLineage"] | undefined;
   for (const result of results) {
     if (!persistence.isCurrent()) {
       throw new ApiJobError("oauth_required", "Higgsfield 계정을 다시 연결해 주세요.", {
@@ -388,7 +394,37 @@ async function parseAndPersistCreatedJobs(
     const remoteResultUrl = isRecord(result.results)
       ? safeHttpsUrl(result.results.rawUrl)
       : undefined;
-    if (result.model !== expectedModelId) {
+    const explicitModel = typeof result.model === "string" ? result.model.trim() : null;
+    const omittedModel =
+      result.model === undefined || result.model === null || explicitModel === "";
+    let resultLineage: HiggsfieldGenerationDiagnostic["modelLineage"] = "conflict";
+    if (
+      persistence.jobSetType === "text2image_soul_v2" &&
+      expectedModelId === "soul_v2"
+    ) {
+      if (explicitModel === "soul_v2") resultLineage = "provider_model";
+      else if (explicitModel === "text2image_soul_v2") resultLineage = "public_job_type";
+      else if (
+        omittedModel &&
+        responseShape === "structured" &&
+        results.length === 1 &&
+        occurrences.get(providerJobId) === 1 &&
+        status !== null
+      ) {
+        resultLineage = "omitted";
+      }
+    } else if (
+      persistence.jobSetType === "gpt_image_2" &&
+      expectedModelId === "gpt_image_2" &&
+      explicitModel === "gpt_image_2"
+    ) {
+      resultLineage = "provider_model";
+    }
+    modelLineage =
+      modelLineage === undefined || modelLineage === resultLineage
+        ? resultLineage
+        : "conflict";
+    if (resultLineage === "conflict") {
       invalid = true;
       modelMismatch = true;
       continue;
@@ -450,7 +486,7 @@ async function parseAndPersistCreatedJobs(
       { status: 502, data: { observedProviderJobIds: [...observed] } },
     );
   }
-  return parsed;
+  return { jobs: parsed, modelLineage: modelLineage ?? "conflict" };
 }
 
 function parseStatusJob(
@@ -639,6 +675,7 @@ export async function createHiggsfieldGeneration(input: {
     let responseShape: HiggsfieldMcpResponseShape = "invalid";
     let rejectionClass: HiggsfieldMcpRejectionClass = "unknown";
     let parseFailure: HiggsfieldMcpParseFailure = "missing";
+    let modelLineage: HiggsfieldGenerationDiagnostic["modelLineage"] = "conflict";
     const claimed = await claimGenerationAttempt({
       requestId: confirmationToken,
       sessionFingerprint: input.fingerprint,
@@ -721,6 +758,7 @@ export async function createHiggsfieldGeneration(input: {
         envelope.content,
         execution.profile.modelId,
         expectedCount,
+        envelope.responseShape,
         {
           fingerprint: input.fingerprint,
           requestId: confirmationToken,
@@ -732,15 +770,19 @@ export async function createHiggsfieldGeneration(input: {
           isCurrent,
         },
       );
+      modelLineage = stored.modelLineage;
       await finishGenerationAttempt({
         sessionFingerprint: input.fingerprint,
         requestId: confirmationToken,
         status: "accepted",
-        providerJobIds: stored.map((job) => job.providerJobId),
+        providerJobIds: stored.jobs.map((job) => job.providerJobId),
         env: input.env,
         now: input.now,
       });
-      return { jobs: stored, observedProviderJobIds: stored.map((job) => job.providerJobId) };
+      return {
+        jobs: stored.jobs,
+        observedProviderJobIds: stored.jobs.map((job) => job.providerJobId),
+      };
     } catch (error) {
       if (generationStartedAt !== undefined && requestDurationMs === undefined) {
         requestDurationMs = Math.max(0, Date.now() - generationStartedAt);
@@ -768,6 +810,7 @@ export async function createHiggsfieldGeneration(input: {
           responseShape,
           rejectionClass,
           parseFailure,
+          modelLineage,
         });
       }
     }

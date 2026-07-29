@@ -902,30 +902,108 @@ describe("Higgsfield MCP discovery boundary", () => {
     }
   });
 
-  test("accepts one structured queued job with validated model lineage", async () => {
-    const fingerprint = "generation-structured-success-session";
+  test("accepts the provider, public, and strict omitted Soul model lineages", async () => {
+    for (const [index, scenario] of [
+      { model: "soul_v2", lineage: "provider_model" },
+      { model: "text2image_soul_v2", lineage: "public_job_type" },
+      { model: undefined, lineage: "omitted" },
+    ].entries()) {
+      const fingerprint = `generation-soul-lineage-${index}`;
+      const providerJobId = `provider-soul-lineage-${index}`;
+      await seed(fingerprint);
+      let creates = 0;
+      const diagnostics: unknown[] = [];
+      const jobs = await createHiggsfieldGeneration({
+        fingerprint,
+        session,
+        jobSetType: "text2image_soul_v2",
+        params: {
+          prompt: "one person in a studio",
+          batch_size: 1,
+          aspect_ratio: "1:1",
+          quality: "1080p",
+          medias: [],
+        },
+        confirmationToken: `request-soul-lineage-${index}`,
+        env: GENERATION_ENV,
+        callTool: async (name, args) => {
+          creates += 1;
+          expect(name).toBe("generate_image");
+          expect(args).toMatchObject({ params: { model: "soul_v2", quality: "2k" } });
+          return {
+            structuredContent: {
+              request_id: "safe-provider-request-2",
+              results: [
+                {
+                  id: providerJobId,
+                  ...(scenario.model === undefined ? {} : { model: scenario.model }),
+                  status: "queued",
+                },
+              ],
+            },
+          };
+        },
+        onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+        now: NOW,
+      });
+      expect(jobs).toEqual([
+        expect.objectContaining({
+          id: providerJobId,
+          job_set_type: "text2image_soul_v2",
+          status: "queued",
+        }),
+      ]);
+      expect(creates).toBe(1);
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          generationStage: "generate_image",
+          providerErrorPresent: false,
+          resultCount: 1,
+          jobIdPresent: true,
+          responseShape: "structured",
+          modelLineage: scenario.lineage,
+        }),
+      ]);
+      expect(JSON.parse(await readFile(generationStateFile(fingerprint), "utf8"))).toMatchObject({
+        jobs: [
+          expect.objectContaining({
+            id: providerJobId,
+            providerModelId: "soul_v2",
+            jobSetType: "text2image_soul_v2",
+          }),
+        ],
+      });
+      await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+      clearHiggsfieldRuntime(fingerprint);
+    }
+  });
+
+  test("keeps GPT Image 2 on its exact provider model lineage", async () => {
+    const fingerprint = "generation-gpt-lineage-session";
     await seed(fingerprint);
     let creates = 0;
     const diagnostics: unknown[] = [];
     const jobs = await createHiggsfieldGeneration({
       fingerprint,
       session,
-      jobSetType: "text2image_soul_v2",
+      jobSetType: "gpt_image_2",
       params: {
-        prompt: "one person in a studio",
+        prompt: "one product in a studio",
         batch_size: 1,
         aspect_ratio: "1:1",
-        quality: "1080p",
+        resolution: "2k",
+        quality: "high",
         medias: [],
       },
-      confirmationToken: "request-structured-success-0001",
+      confirmationToken: "request-gpt-lineage-0001",
       env: GENERATION_ENV,
-      callTool: async () => {
+      callTool: async (name, args) => {
         creates += 1;
+        expect(name).toBe("generate_image");
+        expect(args).toMatchObject({ params: { model: "gpt_image_2" } });
         return {
           structuredContent: {
-            request_id: "safe-provider-request-2",
-            results: [{ id: "provider-structured-1", model: "soul_v2", status: "queued" }],
+            results: [{ id: "provider-gpt-lineage-1", model: "gpt_image_2", status: "queued" }],
           },
         };
       },
@@ -933,16 +1011,15 @@ describe("Higgsfield MCP discovery boundary", () => {
       now: NOW,
     });
     expect(jobs).toEqual([
-      expect.objectContaining({ id: "provider-structured-1", status: "queued" }),
+      expect.objectContaining({
+        id: "provider-gpt-lineage-1",
+        job_set_type: "gpt_image_2",
+        status: "queued",
+      }),
     ]);
     expect(creates).toBe(1);
     expect(diagnostics).toEqual([
-      expect.objectContaining({
-        generationStage: "generate_image",
-        providerErrorPresent: false,
-        resultCount: 1,
-        jobIdPresent: true,
-      }),
+      expect.objectContaining({ modelLineage: "provider_model" }),
     ]);
     await clearGenerationRuntime(fingerprint, GENERATION_ENV);
     clearHiggsfieldRuntime(fingerprint);
@@ -1414,50 +1491,55 @@ describe("Higgsfield MCP discovery boundary", () => {
     clearHiggsfieldRuntime(fingerprint);
   });
 
-  test("rejects a structured generation from a different model without storing it", async () => {
-    const fingerprint = "generation-model-mismatch-session";
-    await seed(fingerprint);
-    let creates = 0;
-    const error = await capturedError(() =>
-      createHiggsfieldGeneration({
-        fingerprint,
-        session,
-        jobSetType: "text2image_soul_v2",
-        params: {
-          prompt: "one person in a studio",
-          batch_size: 1,
-          aspect_ratio: "1:1",
-          quality: "1080p",
-          medias: [],
-        },
-        confirmationToken: "request-model-mismatch-0001",
-        env: GENERATION_ENV,
-        callTool: async () => {
-          creates += 1;
-          return {
-            structuredContent: {
-              results: [
-                { id: "provider-wrong-model-only", model: "soul_2", status: "queued" },
-              ],
-            },
-          };
-        },
-        now: NOW,
-      }),
-    );
-    expect(error).toMatchObject({ code: "job_mismatch", status: 502 });
-    expect(creates).toBe(1);
-    await expect(
-      getHiggsfieldGeneration({
-        fingerprint,
-        session,
-        jobId: "provider-wrong-model-only",
-        env: GENERATION_ENV,
-        now: NOW,
-      }),
-    ).rejects.toMatchObject({ code: "not_found" });
-    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
-    clearHiggsfieldRuntime(fingerprint);
+  test("rejects conflicting Soul model lineages without storing or retrying", async () => {
+    for (const [index, model] of ["soul_2", "soul_cinematic", "other_model"].entries()) {
+      const fingerprint = `generation-model-mismatch-${index}`;
+      const providerJobId = `provider-wrong-model-${index}`;
+      await seed(fingerprint);
+      let creates = 0;
+      const diagnostics: unknown[] = [];
+      const error = await capturedError(() =>
+        createHiggsfieldGeneration({
+          fingerprint,
+          session,
+          jobSetType: "text2image_soul_v2",
+          params: {
+            prompt: "one person in a studio",
+            batch_size: 1,
+            aspect_ratio: "1:1",
+            quality: "1080p",
+            medias: [],
+          },
+          confirmationToken: `request-model-mismatch-${index}`,
+          env: GENERATION_ENV,
+          callTool: async () => {
+            creates += 1;
+            return {
+              structuredContent: {
+                results: [{ id: providerJobId, model, status: "queued" }],
+              },
+            };
+          },
+          onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+          now: NOW,
+        }),
+      );
+      expect(error).toMatchObject({ code: "job_mismatch", status: 502 });
+      expect(creates).toBe(1);
+      expect(diagnostics).toEqual([expect.objectContaining({ modelLineage: "conflict" })]);
+      expect(JSON.stringify(diagnostics)).not.toContain(model);
+      await expect(
+        getHiggsfieldGeneration({
+          fingerprint,
+          session,
+          jobId: providerJobId,
+          env: GENERATION_ENV,
+          now: NOW,
+        }),
+      ).rejects.toMatchObject({ code: "not_found" });
+      await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+      clearHiggsfieldRuntime(fingerprint);
+    }
   });
 
   test("blocks paid generation by default before generate_image is invoked", async () => {
