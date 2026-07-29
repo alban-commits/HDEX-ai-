@@ -2,7 +2,11 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { applySecurityHeaders } from "./lib/security-headers.server";
-import { isApiRequest, unexpectedRequestErrorResponse } from "./server/http.server";
+import {
+  HDEX_API_RESPONSE_HEADER,
+  isApiRequest,
+  unexpectedRequestErrorResponse,
+} from "./server/http.server";
 import { startTemporaryStorageMaintenance } from "./server/temporary-storage.server";
 
 type ServerEntry = {
@@ -44,16 +48,27 @@ export async function normalizeCatastrophicResponse(
   return unexpectedRequestErrorResponse(request);
 }
 
+export function finalizeNodeResponse(request: Request, response: Response): Response {
+  const secured = applySecurityHeaders(response);
+  if (isApiRequest(request) && (secured.status < 300 || secured.status >= 400)) {
+    secured.headers.set(HDEX_API_RESPONSE_HEADER, "1");
+  }
+  return secured;
+}
+
 export default {
   async fetch(request: Request) {
     startTemporaryStorageMaintenance();
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request);
-      return applySecurityHeaders(await normalizeCatastrophicResponse(request, response));
+      return finalizeNodeResponse(
+        request,
+        await normalizeCatastrophicResponse(request, response),
+      );
     } catch (error) {
       console.error(isApiRequest(request) ? "api_request_failed" : error);
-      return applySecurityHeaders(unexpectedRequestErrorResponse(request));
+      return finalizeNodeResponse(request, unexpectedRequestErrorResponse(request));
     }
   },
 };

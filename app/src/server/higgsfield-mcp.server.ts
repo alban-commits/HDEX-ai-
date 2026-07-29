@@ -377,65 +377,170 @@ function toolContractValid(tool: DiscoveredTool): boolean {
   return true;
 }
 
+export type HiggsfieldMcpResponseShape =
+  | "structured"
+  | "json_text"
+  | "plain_text_error"
+  | "direct"
+  | "invalid";
+export type HiggsfieldMcpParseFailure =
+  | "none"
+  | "malformed"
+  | "oversized"
+  | "ambiguous"
+  | "missing";
+export type HiggsfieldMcpRejectionClass =
+  | "credits"
+  | "validation"
+  | "permission"
+  | "moderation"
+  | "unknown";
+
+export class HiggsfieldMcpContentError extends HiggsfieldMcpError {
+  readonly responseShape = "invalid" as const;
+
+  constructor(
+    reason: "invalid_response" | "response_limit",
+    readonly parseFailure: Exclude<HiggsfieldMcpParseFailure, "none">,
+  ) {
+    super(reason);
+  }
+}
+
+export function classifyHiggsfieldProviderRejection(
+  text: string,
+): HiggsfieldMcpRejectionClass {
+  if (/credit|insufficient|balance/i.test(text)) return "credits";
+  if (/moderation|safety|policy|nsfw|content[ _-]?policy/i.test(text)) return "moderation";
+  if (/permission|forbidden|unauthorized|not[ _-]?authorized|access[ _-]?denied/i.test(text)) {
+    return "permission";
+  }
+  if (/validation|invalid|parameter|argument|schema|required|unsupported/i.test(text)) {
+    return "validation";
+  }
+  return "unknown";
+}
+
+function strongerRejectionClass(
+  current: HiggsfieldMcpRejectionClass,
+  candidate: HiggsfieldMcpRejectionClass,
+): HiggsfieldMcpRejectionClass {
+  const rank: Record<HiggsfieldMcpRejectionClass, number> = {
+    unknown: 0,
+    validation: 1,
+    moderation: 2,
+    permission: 3,
+    credits: 4,
+  };
+  return rank[candidate] > rank[current] ? candidate : current;
+}
+
 export function parseHiggsfieldMcpContent(
   value: unknown,
-  options: { strictText?: boolean } = {},
-): { content: Record<string, unknown>; isError: boolean } {
-  if (!isRecord(value)) throw new HiggsfieldMcpError("invalid_response");
+  options: { strictText?: boolean; allowPlainTextError?: boolean } = {},
+): {
+  content: Record<string, unknown>;
+  isError: boolean;
+  responseShape: Exclude<HiggsfieldMcpResponseShape, "invalid">;
+  rejectionClass: HiggsfieldMcpRejectionClass;
+} {
+  if (!isRecord(value)) throw new HiggsfieldMcpContentError("invalid_response", "missing");
   const isEnvelope =
     Object.hasOwn(value, "structuredContent") ||
     Object.hasOwn(value, "content") ||
     Object.hasOwn(value, "isError");
-  if (!isEnvelope) return { content: value, isError: false };
+  if (!isEnvelope) {
+    return {
+      content: value,
+      isError: false,
+      responseShape: "direct",
+      rejectionClass: "unknown",
+    };
+  }
   const candidates: Record<string, unknown>[] = [];
-  if (isRecord(value.structuredContent)) candidates.push(value.structuredContent);
+  const hasStructuredContent = isRecord(value.structuredContent);
+  if (hasStructuredContent) candidates.push(value.structuredContent as Record<string, unknown>);
   else if (
     options.strictText &&
     value.structuredContent !== undefined &&
     value.structuredContent !== null
   ) {
-    throw new HiggsfieldMcpError("invalid_response");
+    throw new HiggsfieldMcpContentError("invalid_response", "malformed");
   }
   let totalTextBytes = 0;
+  let plainTextCount = 0;
+  let plainTextRejectionClass: HiggsfieldMcpRejectionClass = "unknown";
   if (Array.isArray(value.content)) {
     for (const item of value.content) {
       if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
-      totalTextBytes += Buffer.byteLength(item.text);
+      const text = item.text;
+      totalTextBytes += Buffer.byteLength(text);
       if (totalTextBytes > HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) {
-        throw new HiggsfieldMcpError("response_limit");
+        throw new HiggsfieldMcpContentError("response_limit", "oversized");
       }
       try {
-        const parsed = JSON.parse(item.text) as unknown;
+        const parsed = JSON.parse(text) as unknown;
         if (isRecord(parsed)) {
           candidates.push(parsed);
           continue;
         }
       } catch {
-        // Strict generation parsing fails closed below without retaining raw text.
+        if (
+          options.allowPlainTextError &&
+          value.isError === true &&
+          !["{", "["].some((prefix) => text.trimStart().startsWith(prefix))
+        ) {
+          plainTextCount += 1;
+          plainTextRejectionClass = strongerRejectionClass(
+            plainTextRejectionClass,
+            classifyHiggsfieldProviderRejection(text),
+          );
+          continue;
+        }
       }
-      if (options.strictText) throw new HiggsfieldMcpError("invalid_response");
+      if (options.strictText) {
+        throw new HiggsfieldMcpContentError("invalid_response", "malformed");
+      }
     }
   }
-  if (candidates.length === 0) throw new HiggsfieldMcpError("invalid_response");
+  if (candidates.length === 0 && plainTextCount > 0) {
+    return {
+      content: {},
+      isError: true,
+      responseShape: "plain_text_error",
+      rejectionClass: plainTextRejectionClass,
+    };
+  }
+  if (candidates.length === 0) {
+    throw new HiggsfieldMcpContentError("invalid_response", "missing");
+  }
+  if (plainTextCount > 0) {
+    throw new HiggsfieldMcpContentError("invalid_response", "ambiguous");
+  }
   try {
     const firstSerialized = JSON.stringify(candidates[0]);
     if (Buffer.byteLength(firstSerialized) > HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) {
-      throw new HiggsfieldMcpError("response_limit");
+      throw new HiggsfieldMcpContentError("response_limit", "oversized");
     }
     for (const candidate of candidates.slice(1)) {
       const serialized = JSON.stringify(candidate);
       if (Buffer.byteLength(serialized) > HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) {
-        throw new HiggsfieldMcpError("response_limit");
+        throw new HiggsfieldMcpContentError("response_limit", "oversized");
       }
       if (!isDeepStrictEqual(candidate, candidates[0])) {
-        throw new HiggsfieldMcpError("invalid_response");
+        throw new HiggsfieldMcpContentError("invalid_response", "ambiguous");
       }
     }
   } catch (error) {
     if (error instanceof HiggsfieldMcpError) throw error;
-    throw new HiggsfieldMcpError("invalid_response");
+    throw new HiggsfieldMcpContentError("invalid_response", "malformed");
   }
-  return { content: candidates[0]!, isError: value.isError === true };
+  return {
+    content: candidates[0]!,
+    isError: value.isError === true,
+    responseShape: hasStructuredContent ? "structured" : "json_text",
+    rejectionClass: "unknown",
+  };
 }
 
 function structuredContent(value: unknown): Record<string, unknown> {

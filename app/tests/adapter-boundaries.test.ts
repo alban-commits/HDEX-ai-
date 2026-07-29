@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ApiJobError } from "@higgsfield/fnf/errors";
-import { normalizeCatastrophicResponse } from "../src/server";
+import { finalizeNodeResponse, normalizeCatastrophicResponse } from "../src/server";
 import { handleHiggsfieldAdapter } from "../src/server/higgsfield-adapter-route.server";
 import { higgsfieldOAuthSessionFingerprint } from "../src/server/higgsfield-oauth.server";
 import {
@@ -202,9 +202,13 @@ describe("Higgsfield adapter JSON boundary", () => {
             input.onGenerationDiagnostic?.({
               generationStage: "generate_image",
               providerErrorPresent: false,
+              toolErrorPresent: true,
               resultCount: 0,
               jobIdPresent: false,
               requestDurationMs: 24_500,
+              responseShape: "plain_text_error",
+              rejectionClass: "validation",
+              parseFailure: "none",
             });
             throw new ApiJobError(
               "outcome_unknown",
@@ -230,9 +234,13 @@ describe("Higgsfield adapter JSON boundary", () => {
         errorCode: "outcome_unknown",
         generationStage: "generate_image",
         providerErrorPresent: false,
+        toolErrorPresent: true,
         resultCount: 0,
         jobIdPresent: false,
         requestDurationMs: 24_500,
+        responseShape: "plain_text_error",
+        rejectionClass: "validation",
+        parseFailure: "none",
       });
       expect(diagnostics[0]).not.toContain("private prompt");
       expect(diagnostics[0]).not.toContain("private-request-id");
@@ -290,6 +298,34 @@ describe("Higgsfield adapter JSON boundary", () => {
 });
 
 describe("Node catastrophic error response boundary", () => {
+  test("marks final non-redirect API responses but leaves OAuth redirects unchanged", () => {
+    const api = finalizeNodeResponse(
+      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/adapter`),
+      Response.json(
+        { ok: false, error: { code: "outcome_unknown" } },
+        { status: 502 },
+      ),
+    );
+    expect(api.status).toBe(502);
+    expect(api.headers.get("x-hdex-api-response")).toBe("1");
+
+    for (const path of [
+      "/api/higgsfield/oauth/connect",
+      "/api/higgsfield/oauth/callback?code=private-query",
+    ]) {
+      const redirect = finalizeNodeResponse(
+        new Request(`${PUBLIC_ORIGIN}${path}`),
+        new Response(null, {
+          status: 302,
+          headers: { location: `${PUBLIC_ORIGIN}/` },
+        }),
+      );
+      expect(redirect.status).toBe(302);
+      expect(redirect.headers.get("location")).toBe(`${PUBLIC_ORIGIN}/`);
+      expect(redirect.headers.get("x-hdex-api-response")).toBeNull();
+    }
+  });
+
   test("returns API failures as JSON while preserving page failures as HTML", async () => {
     const originalError = console.error;
     const logs: unknown[] = [];

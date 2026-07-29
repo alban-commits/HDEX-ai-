@@ -1026,11 +1026,87 @@ describe("Higgsfield MCP discovery boundary", () => {
     clearHiggsfieldRuntime(fingerprint);
   });
 
+  test("classifies bounded plain-text tool errors without retry or disclosure", async () => {
+    for (const scenario of [
+      {
+        name: "credits",
+        text: "Insufficient credit balance token=private-tool-token https://private.example/job",
+        expectedCode: "insufficient_credits",
+        expectedStatus: 402,
+        rejectionClass: "credits",
+      },
+      {
+        name: "validation",
+        text: "Invalid required parameter prompt=private prompt file://private/path",
+        expectedCode: "provider_failure",
+        expectedStatus: 502,
+        rejectionClass: "validation",
+      },
+    ] as const) {
+      const fingerprint = `generation-plain-text-${scenario.name}-session`;
+      await seed(fingerprint);
+      let creates = 0;
+      const diagnostics: unknown[] = [];
+      const error = await capturedError(() =>
+        createHiggsfieldGeneration({
+          fingerprint,
+          session,
+          jobSetType: "text2image_soul_v2",
+          params: {
+            prompt: "one person in a studio",
+            batch_size: 1,
+            aspect_ratio: "1:1",
+            quality: "1080p",
+            medias: [],
+          },
+          confirmationToken: `request-plain-text-${scenario.name}-0001`,
+          env: GENERATION_ENV,
+          callTool: async () => {
+            creates += 1;
+            return {
+              isError: true,
+              content: [{ type: "text", text: scenario.text }],
+            };
+          },
+          onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+          now: NOW,
+        }),
+      );
+      expect(error).toMatchObject({ code: scenario.expectedCode, status: scenario.expectedStatus });
+      expect(creates).toBe(1);
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          generationStage: "generate_image",
+          providerErrorPresent: false,
+          toolErrorPresent: true,
+          resultCount: 0,
+          jobIdPresent: false,
+          responseShape: "plain_text_error",
+          rejectionClass: scenario.rejectionClass,
+          parseFailure: "none",
+        }),
+      ]);
+      const serialized = JSON.stringify({ error, diagnostics });
+      expect(serialized).not.toContain(scenario.text);
+      expect(serialized).not.toContain("private-tool-token");
+      expect(serialized).not.toContain("private.example");
+      expect(serialized).not.toContain("private prompt");
+      expect(serialized).not.toContain("private/path");
+      await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+      clearHiggsfieldRuntime(fingerprint);
+    }
+  });
+
   test("fails closed on malformed, oversized, or ambiguous text content without retry", async () => {
-    const cases: Array<{ name: string; content: Array<{ type: "text"; text: string }> }> = [
+    const cases: Array<{
+      name: string;
+      content: Array<{ type: "text"; text: string }>;
+      parseFailure: "malformed" | "oversized" | "ambiguous";
+    }> = [
       {
         name: "malformed",
         content: [{ type: "text", text: '{"results":' }],
+        parseFailure: "malformed",
       },
       {
         name: "oversized",
@@ -1040,6 +1116,7 @@ describe("Higgsfield MCP discovery boundary", () => {
             text: JSON.stringify({ padding: "x".repeat(HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) }),
           },
         ],
+        parseFailure: "oversized",
       },
       {
         name: "ambiguous",
@@ -1057,12 +1134,14 @@ describe("Higgsfield MCP discovery boundary", () => {
             }),
           },
         ],
+        parseFailure: "ambiguous",
       },
     ];
     for (const scenario of cases) {
       const fingerprint = `generation-text-${scenario.name}-session`;
       await seed(fingerprint);
       let creates = 0;
+      const diagnostics: unknown[] = [];
       const error = await capturedError(() =>
         createHiggsfieldGeneration({
           fingerprint,
@@ -1081,11 +1160,20 @@ describe("Higgsfield MCP discovery boundary", () => {
             creates += 1;
             return { content: scenario.content };
           },
+          onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
           now: NOW,
         }),
       );
       expect(error).toMatchObject({ code: "outcome_unknown", status: 502 });
       expect(creates).toBe(1);
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          toolErrorPresent: false,
+          responseShape: "invalid",
+          rejectionClass: "unknown",
+          parseFailure: scenario.parseFailure,
+        }),
+      ]);
       await clearGenerationRuntime(fingerprint, GENERATION_ENV);
       clearHiggsfieldRuntime(fingerprint);
     }

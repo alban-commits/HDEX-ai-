@@ -159,12 +159,40 @@ export async function handleHiggsfieldAdapter(
             generationDiagnostic = {
               generationStage: "generate_image",
               providerErrorPresent: diagnostic.providerErrorPresent === true,
+              toolErrorPresent: diagnostic.toolErrorPresent === true,
               resultCount: Math.min(Math.max(Math.trunc(diagnostic.resultCount), 0), 10_000),
               jobIdPresent: diagnostic.jobIdPresent === true,
               requestDurationMs: Math.min(
                 Math.max(Math.trunc(diagnostic.requestDurationMs), 0),
                 300_000,
               ),
+              responseShape: [
+                "structured",
+                "json_text",
+                "plain_text_error",
+                "direct",
+                "invalid",
+              ].includes(diagnostic.responseShape)
+                ? diagnostic.responseShape
+                : "invalid",
+              rejectionClass: [
+                "credits",
+                "validation",
+                "permission",
+                "moderation",
+                "unknown",
+              ].includes(diagnostic.rejectionClass)
+                ? diagnostic.rejectionClass
+                : "unknown",
+              parseFailure: [
+                "none",
+                "malformed",
+                "oversized",
+                "ambiguous",
+                "missing",
+              ].includes(diagnostic.parseFailure)
+                ? diagnostic.parseFailure
+                : "missing",
             };
           },
         });

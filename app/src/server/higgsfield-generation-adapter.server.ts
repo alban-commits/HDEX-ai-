@@ -1,11 +1,16 @@
 import { ApiJobError } from "@higgsfield/fnf/errors";
 import {
   callHiggsfieldMcpTool,
+  classifyHiggsfieldProviderRejection,
   getHiggsfieldCapabilityRecord,
+  HiggsfieldMcpContentError,
   HiggsfieldMcpError,
   parseHiggsfieldMcpContent,
   requireDiscoveredModel,
   type DiscoveredModelProfile,
+  type HiggsfieldMcpParseFailure,
+  type HiggsfieldMcpRejectionClass,
+  type HiggsfieldMcpResponseShape,
 } from "./higgsfield-mcp.server";
 import type { HiggsfieldOAuthSession } from "./higgsfield-oauth.server";
 import {
@@ -40,9 +45,13 @@ type ToolInvoker = (
 export type HiggsfieldGenerationDiagnostic = {
   generationStage: "generate_image";
   providerErrorPresent: boolean;
+  toolErrorPresent: boolean;
   resultCount: number;
   jobIdPresent: boolean;
   requestDurationMs: number;
+  responseShape: HiggsfieldMcpResponseShape;
+  rejectionClass: HiggsfieldMcpRejectionClass;
+  parseFailure: HiggsfieldMcpParseFailure;
 };
 
 type GenerationFlightOutcome = {
@@ -74,9 +83,19 @@ function safeHttpsUrl(value: unknown): string | null {
 function structuredGenerationContent(value: unknown): {
   content: Record<string, unknown>;
   toolError: boolean;
+  responseShape: Exclude<HiggsfieldMcpResponseShape, "invalid">;
+  rejectionClass: HiggsfieldMcpRejectionClass;
 } {
-  const parsed = parseHiggsfieldMcpContent(value, { strictText: true });
-  return { content: parsed.content, toolError: parsed.isError };
+  const parsed = parseHiggsfieldMcpContent(value, {
+    strictText: true,
+    allowPlainTextError: true,
+  });
+  return {
+    content: parsed.content,
+    toolError: parsed.isError,
+    responseShape: parsed.responseShape,
+    rejectionClass: parsed.rejectionClass,
+  };
 }
 
 function responseRequestId(content: Record<string, unknown>): string | null {
@@ -88,7 +107,21 @@ function providerError(content: Record<string, unknown>): string | null {
 }
 
 function explicitProviderFailure(error: string): ApiJobError {
-  return /credit|insufficient|balance/i.test(error)
+  return classifyHiggsfieldProviderRejection(error) === "credits"
+    ? new ApiJobError(
+        "insufficient_credits",
+        "Higgsfield 개인 계정 크레딧을 확인해 주세요.",
+        { status: 402 },
+      )
+    : new ApiJobError(
+        "provider_failure",
+        "Higgsfield 이미지 생성 요청이 거부되었습니다.",
+        { status: 502 },
+      );
+}
+
+function toolProviderFailure(rejectionClass: HiggsfieldMcpRejectionClass): ApiJobError {
+  return rejectionClass === "credits"
     ? new ApiJobError(
         "insufficient_credits",
         "Higgsfield 개인 계정 크레딧을 확인해 주세요.",
@@ -602,9 +635,13 @@ export async function createHiggsfieldGeneration(input: {
   const promise = (async (): Promise<GenerationFlightOutcome> => {
     let generationStartedAt: number | undefined;
     let providerErrorPresent = false;
+    let toolErrorPresent = false;
     let resultCount = 0;
     let jobIdPresent = false;
     let requestDurationMs: number | undefined;
+    let responseShape: HiggsfieldMcpResponseShape = "invalid";
+    let rejectionClass: HiggsfieldMcpRejectionClass = "unknown";
+    let parseFailure: HiggsfieldMcpParseFailure = "missing";
     const claimed = await claimGenerationAttempt({
       requestId: confirmationToken,
       sessionFingerprint: input.fingerprint,
@@ -649,13 +686,26 @@ export async function createHiggsfieldGeneration(input: {
       generationStartedAt = Date.now();
       const response = await callTool("generate_image", { params: execution.params });
       requestDurationMs = Math.max(0, Date.now() - generationStartedAt);
+      toolErrorPresent = isRecord(response) && response.isError === true;
       if (!isCurrent()) {
         throw new ApiJobError("oauth_required", "Higgsfield 계정을 다시 연결해 주세요.", {
           status: 401,
           data: { reconnectRequired: true },
         });
       }
-      const envelope = structuredGenerationContent(response);
+      let envelope: ReturnType<typeof structuredGenerationContent>;
+      try {
+        envelope = structuredGenerationContent(response);
+        responseShape = envelope.responseShape;
+        rejectionClass = envelope.rejectionClass;
+        parseFailure = "none";
+      } catch (error) {
+        if (error instanceof HiggsfieldMcpContentError) {
+          responseShape = error.responseShape;
+          parseFailure = error.parseFailure;
+        }
+        throw error;
+      }
       const explicitError = providerError(envelope.content);
       providerErrorPresent = explicitError !== null;
       resultCount = Array.isArray(envelope.content.results) ? envelope.content.results.length : 0;
@@ -663,13 +713,12 @@ export async function createHiggsfieldGeneration(input: {
         ? envelope.content.results.some((result) => isRecord(result) && safeId(result.id) !== null)
         : false;
       void responseRequestId(envelope.content);
-      if (explicitError) throw explicitProviderFailure(explicitError);
+      if (explicitError) {
+        rejectionClass = classifyHiggsfieldProviderRejection(explicitError);
+        throw explicitProviderFailure(explicitError);
+      }
       if (envelope.toolError) {
-        throw new ApiJobError(
-          "provider_failure",
-          "Higgsfield 이미지 생성 요청이 거부되었습니다.",
-          { status: 502 },
-        );
+        throw toolProviderFailure(rejectionClass);
       }
       const stored = await parseAndPersistCreatedJobs(
         envelope.content,
@@ -715,9 +764,13 @@ export async function createHiggsfieldGeneration(input: {
         input.onGenerationDiagnostic?.({
           generationStage: "generate_image",
           providerErrorPresent,
+          toolErrorPresent,
           resultCount,
           jobIdPresent,
           requestDurationMs: requestDurationMs ?? 0,
+          responseShape,
+          rejectionClass,
+          parseFailure,
         });
       }
     }
