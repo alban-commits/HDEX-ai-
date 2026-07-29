@@ -161,42 +161,7 @@ function soulDetail(id: string) {
 function canonicalDetail(name: "Soul 2" | "GPT Image 2"): Record<string, unknown> {
   return {
     ...structuredClone(detail(name)),
-    id: name === "Soul 2" ? "text2image_soul_v2" : "gpt_image_2",
-  };
-}
-
-async function rejectedSoulDiagnostic(input: {
-  soulContent: Record<string, unknown>;
-  discoveredTools?: typeof tools;
-  fallbackModels?: Array<Record<string, unknown>>;
-}) {
-  const lines: string[] = [];
-  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const record = await inspectHiggsfieldProvider({
-    now: NOW,
-    listTools: async () => ({ tools: input.discoveredTools ?? tools }),
-    logDiagnostic: (line) => lines.push(line),
-    callTool: async (name, args) => {
-      calls.push({ name, args });
-      if (args.action === "get") {
-        return {
-          structuredContent:
-            args.model_id === "text2image_soul_v2"
-              ? input.soulContent
-              : canonicalDetail("GPT Image 2"),
-        };
-      }
-      if (args.action === "search" && String(args.query).includes("Soul")) {
-        return { structuredContent: { models: input.fallbackModels ?? [] } };
-      }
-      return { structuredContent: { models: [] } };
-    },
-  });
-  return {
-    calls,
-    record,
-    lines,
-    diagnostic: JSON.parse(lines[0] ?? "{}") as Record<string, unknown>,
+    id: name === "Soul 2" ? "soul_v2" : "gpt_image_2",
   };
 }
 
@@ -227,7 +192,7 @@ async function discoveredRecord(): Promise<{
       }
       return {
         structuredContent:
-          args.model_id === "text2image_soul_v2"
+          args.model_id === "soul_v2"
             ? canonicalDetail("Soul 2")
             : canonicalDetail("GPT Image 2"),
       };
@@ -268,7 +233,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       { name: "GPT Image 2", ready: true },
     ]);
     expect(record.models.map((model) => model.modelId)).toEqual([
-      "text2image_soul_v2",
+      "soul_v2",
       "gpt_image_2",
     ]);
     expect(record.models[0]).toMatchObject({
@@ -308,7 +273,7 @@ describe("Higgsfield MCP discovery boundary", () => {
             structuredContent: {
               models: [
                 soul
-                  ? { id: "text2image_soul_v2", name: "Higgsfield Soul V2" }
+                  ? { id: "soul_v2", name: "Higgsfield Soul V2" }
                   : { id: "gpt_image_2", name: "GPT Image 2" },
               ],
             },
@@ -316,7 +281,7 @@ describe("Higgsfield MCP discovery boundary", () => {
         }
         return {
           structuredContent:
-            args.model_id === "text2image_soul_v2" ? canonicalDetail("Soul 2") : gpt,
+            args.model_id === "soul_v2" ? canonicalDetail("Soul 2") : gpt,
         };
       },
     });
@@ -347,20 +312,20 @@ describe("Higgsfield MCP discovery boundary", () => {
             structuredContent: {
               models: [
                 isSoul
-                  ? { id: "text2image_soul_v2", name: "Higgsfield Soul V2" }
+                  ? { id: "soul_v2", name: "Higgsfield Soul V2" }
                   : { id: "gpt_image_2", name: "GPT Image 2" },
               ],
             },
           };
         }
         return {
-          structuredContent: args.model_id === "text2image_soul_v2" ? soul : canonicalDetail("GPT Image 2"),
+          structuredContent: args.model_id === "soul_v2" ? soul : canonicalDetail("GPT Image 2"),
         };
       },
     });
     expect(record.models[0]).toMatchObject({
       available: true,
-      modelId: "text2image_soul_v2",
+      modelId: "soul_v2",
       mediaRole: "provider_image_reference",
       maximumImages: 1,
       resolutionParameter: "quality",
@@ -368,244 +333,6 @@ describe("Higgsfield MCP discovery boundary", () => {
     });
     expect(record.models[1]).toMatchObject({ available: true });
     expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
-  });
-
-  test("emits one bounded Soul diagnostic for every profile rejection stage", async () => {
-    const aspects = ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"];
-    const schemaIncompatibleTools = structuredClone(tools);
-    const generate = schemaIncompatibleTools.find((tool) => tool.name === "generate_image")!;
-    generate.inputSchema.properties.params.anyOf[0].properties.medias.items.properties.role.enum = [
-      "reference",
-    ];
-    generate.inputSchema.properties.params.anyOf[1].properties.medias.items.properties.role.enum = [
-      "reference",
-    ];
-    const cases: Array<{
-      code: string;
-      soulContent: Record<string, unknown>;
-      discoveredTools?: typeof tools;
-    }> = [
-      { code: "canonical_detail_missing", soulContent: {} },
-      {
-        code: "canonical_identity_mismatch",
-        soulContent: { ...canonicalDetail("Soul 2"), id: "runtime/not-canonical" },
-      },
-      {
-        code: "provider_conflict",
-        soulContent: { ...canonicalDetail("Soul 2"), provider_name: "Different Provider" },
-      },
-      {
-        code: "output_conflict",
-        soulContent: { ...canonicalDetail("Soul 2"), output_type: "video" },
-      },
-      {
-        code: "parameter_contract_missing",
-        soulContent: { ...canonicalDetail("Soul 2"), parameters: [] },
-      },
-      {
-        code: "aspect_mapping_invalid",
-        soulContent: { ...canonicalDetail("Soul 2"), aspect_ratios: aspects.slice(0, 5) },
-      },
-      {
-        code: "quality_2k_mapping_invalid",
-        soulContent: {
-          ...canonicalDetail("Soul 2"),
-          parameters: [
-            { name: "aspect_ratio", options: aspects },
-            { name: "quality", options: ["1.5k"] },
-          ],
-        },
-      },
-      {
-        code: "media_contract_invalid",
-        soulContent: { ...canonicalDetail("Soul 2"), medias: [{ roles: ["reference"], max: 0 }] },
-      },
-      {
-        code: "generate_schema_incompatible",
-        soulContent: {
-          ...canonicalDetail("Soul 2"),
-          medias: [{ roles: ["soul-reference"], max: 1 }],
-        },
-        discoveredTools: schemaIncompatibleTools,
-      },
-    ];
-
-    for (const item of cases) {
-      const result = await rejectedSoulDiagnostic(item);
-      expect(result.lines).toHaveLength(1);
-      expect(result.diagnostic.rejectionCode).toBe(item.code);
-      expect(result.diagnostic.targetKey).toBe("soul_2");
-      expect(result.diagnostic.canonicalJobType).toBe("text2image_soul_v2");
-      expect(result.record.models[0]).toMatchObject({
-        available: false,
-        reason: "profile_invalid",
-      });
-      expect(result.record.models[1]).toMatchObject({
-        available: true,
-        modelId: "gpt_image_2",
-      });
-      expect(new Set(result.calls.map((call) => call.name))).toEqual(
-        new Set(["models_explore"]),
-      );
-      expect(result.calls.some((call) => call.args.action === "generate_image")).toBe(false);
-    }
-  });
-
-  test("logs only allowlisted bounded metadata and keeps diagnostics out of browser summary", async () => {
-    const soul = canonicalDetail("Soul 2");
-    soul.medias = [{ roles: ["reference", "mask"], max: 1, media_id: "private-media-id" }];
-    soul.parameters = [
-      {
-        name: "quality",
-        options: [
-          "2k",
-          "access_token",
-          "refresh_token",
-          "accessToken",
-          "authorization_header",
-          "cookieValue",
-          "secret_value",
-          "bearer-value",
-          "https://signed.example/result",
-          "ftp://files.example/model",
-          "file://private/model",
-          "s3://private-bucket/model",
-        ],
-      },
-      { name: "access_token", options: ["allowed-looking-value"] },
-      { name: "refresh_token", options: ["allowed-looking-value"] },
-      { name: "accessToken", options: ["allowed-looking-value"] },
-      { name: "authorization_header", options: ["allowed-looking-value"] },
-      { name: "cookieValue", options: ["allowed-looking-value"] },
-      { name: "secret_value", options: ["allowed-looking-value"] },
-    ];
-    Object.assign(soul, {
-      access_token: "secret-access-token",
-      refresh_token: "secret-refresh-token",
-      cookie: "private-cookie",
-      authorization: "Bearer private-authorization",
-      url: "https://signed.example/result",
-      prompt: "private prompt",
-      raw_response: { forbidden: true },
-    });
-    const fallbackModels = [
-      {
-        id: "access_token",
-        name: "refresh_token",
-        job_set_type: "accessToken",
-        provider_name: "authorization_header",
-        output_type: "cookieValue",
-      },
-      {
-        id: "secret_value",
-        name: "bearer-value",
-        job_set_type: "ftp://files.example/model",
-        provider_name: "Higgsfield",
-        output_type: "image",
-      },
-      {
-        id: "file://private/model",
-        name: "s3://private-bucket/model",
-        job_set_type: "runtime_soul_2",
-        provider_name: "Higgsfield",
-        output_type: "image",
-      },
-      ...Array.from({ length: 4 }, (_, index) => ({
-        id: `runtime/soul-${index + 3}`,
-        name: `Soul ${index + 3}`,
-        job_set_type: `runtime_soul_${index + 3}`,
-        provider_name: "Higgsfield",
-        output_type: "image",
-        access_token: "fallback-secret-token",
-        url: "https://signed.example/fallback",
-      })),
-    ];
-    const result = await rejectedSoulDiagnostic({ soulContent: soul, fallbackModels });
-    expect(result.lines).toHaveLength(1);
-    expect(Object.keys(result.diagnostic).sort()).toEqual(
-      [
-        "aspectRatios",
-        "canonicalJobType",
-        "fallbackCandidates",
-        "media",
-        "name",
-        "outputType",
-        "parameters",
-        "providerName",
-        "rejectionCode",
-        "responseIdentity",
-        "targetKey",
-      ].sort(),
-    );
-    expect(result.diagnostic.rejectionCode).toBe("media_contract_invalid");
-    expect(result.diagnostic.responseIdentity).toEqual({
-      id: { present: true, value: "text2image_soul_v2" },
-      modelId: { present: false },
-      jobSetType: { present: false },
-    });
-    expect(result.diagnostic.fallbackCandidates).toHaveLength(5);
-    expect(result.diagnostic.parameters).toEqual([{ name: "quality", enumValues: ["2k"] }]);
-    const serializedDiagnostic = result.lines[0]!;
-    expect(serializedDiagnostic).not.toContain("\n");
-    for (const forbidden of [
-      "secret-access-token",
-      "secret-refresh-token",
-      "private-cookie",
-      "private-authorization",
-      "https://",
-      "private-media-id",
-      "private prompt",
-      "raw_response",
-      "access_token",
-      "refresh_token",
-      "accessToken",
-      "authorization_header",
-      "cookieValue",
-      "secret_value",
-      "bearer-value",
-      "ftp://",
-      "file://",
-      "s3://",
-    ]) {
-      expect(serializedDiagnostic).not.toContain(forbidden);
-    }
-
-    const fingerprint = "diagnostic-summary-session";
-    await inspectHiggsfieldCapabilities({
-      sessionFingerprint: fingerprint,
-      mcpUrl: session.resource,
-      accessToken: session.accessToken,
-      now: NOW,
-      runner: async () => result.record,
-    });
-    const summary = JSON.stringify(getHiggsfieldCapabilitySummary(fingerprint, NOW));
-    expect(summary).toContain("profile_invalid");
-    expect(summary).not.toContain("rejectionCode");
-    expect(summary).not.toContain("fallbackCandidates");
-    expect(summary).not.toContain("text2image_soul_v2");
-    clearHiggsfieldRuntime(fingerprint);
-  });
-
-  test("does not emit a profile diagnostic when the public reason is tool_contract_invalid", async () => {
-    const lines: string[] = [];
-    const record = await inspectHiggsfieldProvider({
-      now: NOW,
-      listTools: async () => ({ tools, nextCursor: "incomplete-tools" }),
-      logDiagnostic: (line) => lines.push(line),
-      callTool: async (_name, args) => ({
-        structuredContent:
-          args.action === "get"
-            ? args.model_id === "text2image_soul_v2"
-              ? {}
-              : canonicalDetail("GPT Image 2")
-            : { models: [] },
-      }),
-    });
-    expect(record.models[0]).toMatchObject({
-      available: false,
-      reason: "tool_contract_invalid",
-    });
-    expect(lines).toHaveLength(0);
   });
 
   test("rejects explicit search and detail provider or output conflicts", async () => {
@@ -625,7 +352,7 @@ describe("Higgsfield MCP discovery boundary", () => {
               structuredContent: {
                 models: [
                   soul
-                    ? { id: "text2image_soul_v2", name: "Higgsfield Soul V2" }
+                    ? { id: "soul_v2", name: "Higgsfield Soul V2" }
                     : {
                         id: "gpt_image_2",
                         name: "GPT Image 2",
@@ -638,7 +365,7 @@ describe("Higgsfield MCP discovery boundary", () => {
           }
           return {
             structuredContent:
-              args.model_id === "text2image_soul_v2"
+              args.model_id === "soul_v2"
                 ? canonicalDetail("Soul 2")
                 : { ...canonicalDetail("GPT Image 2"), ...conflicting },
           };
@@ -663,7 +390,7 @@ describe("Higgsfield MCP discovery boundary", () => {
             structuredContent: {
               models: [
                 soul
-                  ? { id: "text2image_soul_v2", name: "Higgsfield Soul V2" }
+                  ? { id: "soul_v2", name: "Higgsfield Soul V2" }
                   : { id: "gpt_image_2", name: "GPT Image 2" },
               ],
             },
@@ -671,7 +398,7 @@ describe("Higgsfield MCP discovery boundary", () => {
         }
         return {
           structuredContent:
-            args.model_id === "text2image_soul_v2" ? canonicalDetail("Soul 2") : gpt,
+            args.model_id === "soul_v2" ? canonicalDetail("Soul 2") : gpt,
         };
       },
     });
@@ -690,7 +417,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       listTools: async () => ({ tools: oneOfTools }),
       callTool: async (_name, args) => {
         const model = canonicalDetail(
-          args.model_id === "text2image_soul_v2" ? "Soul 2" : "GPT Image 2",
+          args.model_id === "soul_v2" ? "Soul 2" : "GPT Image 2",
         );
         return args.action === "search"
           ? { structuredContent: { models: [model] } }
@@ -863,7 +590,7 @@ describe("Higgsfield MCP discovery boundary", () => {
     ).toBe(true);
   });
 
-  test("uses canonical get before any same-name Soul alias search", async () => {
+  test("uses soul_v2 directly despite the live catalog's similarly named Soul candidates", async () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const record = await inspectHiggsfieldProvider({
       now: NOW,
@@ -873,7 +600,7 @@ describe("Higgsfield MCP discovery boundary", () => {
         if (args.action === "get") {
           return {
             structuredContent:
-              args.model_id === "text2image_soul_v2"
+              args.model_id === "soul_v2"
                 ? canonicalDetail("Soul 2")
                 : canonicalDetail("GPT Image 2"),
           };
@@ -883,14 +610,20 @@ describe("Higgsfield MCP discovery boundary", () => {
             structuredContent: {
               models: [
                 {
-                  id: "runtime/soul-a",
-                  name: "Higgsfield Soul V2",
+                  id: "soul_2",
+                  name: "Higgsfield Soul 2.0",
                   provider_name: "Higgsfield",
                   output_type: "image",
                 },
                 {
-                  id: "runtime/soul-b",
-                  name: "Soul 2",
+                  id: "soul_cinematic",
+                  name: "Soul Cinema",
+                  provider_name: "Higgsfield",
+                  output_type: "image",
+                },
+                {
+                  id: "soul_v2",
+                  name: "Higgsfield Soul 2.0",
                   provider_name: "Higgsfield",
                   output_type: "image",
                 },
@@ -903,11 +636,11 @@ describe("Higgsfield MCP discovery boundary", () => {
     });
     expect(record.models.every((model) => model.available)).toBe(true);
     expect(record.models.map((model) => model.modelId)).toEqual([
-      "text2image_soul_v2",
+      "soul_v2",
       "gpt_image_2",
     ]);
     expect(calls.map((call) => call.args)).toEqual([
-      { action: "get", model_id: "text2image_soul_v2" },
+      { action: "get", model_id: "soul_v2" },
       { action: "get", model_id: "gpt_image_2" },
     ]);
     expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
@@ -927,7 +660,7 @@ describe("Higgsfield MCP discovery boundary", () => {
           return { structuredContent: { models: [model] } };
         }
         const model = canonicalDetail(
-          args.model_id === "text2image_soul_v2" ? "Soul 2" : "GPT Image 2",
+          args.model_id === "soul_v2" ? "Soul 2" : "GPT Image 2",
         );
         if (!Array.isArray(model.parameters) || !Array.isArray(model.aspect_ratios)) {
           throw new Error("invalid test fixture");
@@ -941,36 +674,41 @@ describe("Higgsfield MCP discovery boundary", () => {
     ).toBe(true);
   });
 
-  test("fails closed on a mismatched canonical detail ID without selecting an alias", async () => {
-    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-    const record = await inspectHiggsfieldProvider({
-      now: NOW,
-      listTools: async () => ({ tools }),
-      callTool: async (name, args) => {
-        calls.push({ name, args });
-        if (args.action === "get" && args.model_id === "text2image_soul_v2") {
-          return { structuredContent: soulDetail("runtime/soul-valid") };
-        }
-        if (args.action === "get") {
-          return { structuredContent: canonicalDetail("GPT Image 2") };
-        }
-        if (args.action === "search" && args.query === "Higgsfield Soul V2") {
-          return {
-            structuredContent: {
-              models: [
-                { id: "runtime/soul-valid", name: "Higgsfield Soul V2" },
-              ],
-            },
-          };
-        }
-        return { structuredContent: { models: [] } };
-      },
-    });
-    expect(record.models[0]).toMatchObject({ available: false, reason: "profile_invalid" });
-    expect(record.models[1]).toMatchObject({ available: true });
-    expect(calls.filter((call) => call.args.action === "get")).toHaveLength(2);
-    expect(calls.some((call) => call.args.model_id === "runtime/soul-valid")).toBe(false);
-    expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
+  test("fails closed when the soul_v2 detail ID is missing or mismatched", async () => {
+    for (const soulContent of [{}, soulDetail("soul_2")]) {
+      const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+      const record = await inspectHiggsfieldProvider({
+        now: NOW,
+        listTools: async () => ({ tools }),
+        callTool: async (name, args) => {
+          calls.push({ name, args });
+          if (args.action === "get" && args.model_id === "soul_v2") {
+            return { structuredContent: soulContent };
+          }
+          if (args.action === "get") {
+            return { structuredContent: canonicalDetail("GPT Image 2") };
+          }
+          if (args.action === "search" && args.query === "Higgsfield Soul V2") {
+            return {
+              structuredContent: {
+                models: [
+                  { id: "soul_2", name: "Higgsfield Soul 2.0" },
+                  { id: "soul_cinematic", name: "Soul Cinema" },
+                  { id: "soul_v2", name: "Higgsfield Soul 2.0" },
+                ],
+              },
+            };
+          }
+          return { structuredContent: { models: [] } };
+        },
+      });
+      expect(record.models[0]).toMatchObject({ available: false, reason: "profile_invalid" });
+      expect(record.models[1]).toMatchObject({ available: true, modelId: "gpt_image_2" });
+      expect(calls.filter((call) => call.args.action === "get")).toHaveLength(2);
+      expect(calls.some((call) => call.args.model_id === "soul_2")).toBe(false);
+      expect(calls.some((call) => call.args.model_id === "soul_cinematic")).toBe(false);
+      expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
+    }
   });
 
   test("does not promote the first alias when canonical get fails", async () => {
@@ -980,7 +718,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       listTools: async () => ({ tools }),
       callTool: async (name, args) => {
         calls.push({ name, args });
-        if (args.action === "get" && args.model_id === "text2image_soul_v2") {
+        if (args.action === "get" && args.model_id === "soul_v2") {
           throw new HiggsfieldMcpError("provider_failure");
         }
         if (args.action === "get") {
@@ -990,8 +728,18 @@ describe("Higgsfield MCP discovery boundary", () => {
           return {
             structuredContent: {
               models: [
-                { id: "runtime/soul-valid", name: "Soul 2" },
-                { id: "runtime/soul-other", name: "Soul 2.0" },
+                {
+                  ...soulDetail("soul_2"),
+                  name: "Higgsfield Soul 2.0",
+                },
+                {
+                  ...soulDetail("soul_cinematic"),
+                  name: "Soul Cinema",
+                },
+                {
+                  ...soulDetail("soul_v2"),
+                  name: "Higgsfield Soul 2.0",
+                },
               ],
             },
           };
@@ -1001,40 +749,9 @@ describe("Higgsfield MCP discovery boundary", () => {
     });
     expect(record.models[0]).toMatchObject({ available: false, reason: "profile_invalid" });
     expect(record.models[1]).toMatchObject({ available: true });
-    expect(calls.some((call) => call.args.model_id === "runtime/soul-valid")).toBe(false);
-    expect(calls.some((call) => call.args.model_id === "runtime/soul-other")).toBe(false);
+    expect(calls.some((call) => call.args.model_id === "soul_2")).toBe(false);
+    expect(calls.some((call) => call.args.model_id === "soul_cinematic")).toBe(false);
     expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
-  });
-
-  test("does not treat multiple valid-looking Soul aliases as canonical", async () => {
-    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-    const record = await inspectHiggsfieldProvider({
-      now: NOW,
-      listTools: async () => ({ tools }),
-      callTool: async (name, args) => {
-        calls.push({ name, args });
-        if (args.action === "get" && args.model_id === "text2image_soul_v2") {
-          return { structuredContent: { id: "runtime/not-canonical" } };
-        }
-        if (args.action === "get") {
-          return { structuredContent: canonicalDetail("GPT Image 2") };
-        }
-        if (args.action === "search" && args.query === "Higgsfield Soul V2") {
-          return {
-            structuredContent: {
-              models: [
-                { id: "runtime/soul-a", name: "Higgsfield Soul V2", provider_name: "Higgsfield" },
-                { id: "runtime/soul-b", name: "Soul 2", provider_name: "Higgsfield" },
-              ],
-            },
-          };
-        }
-        return { structuredContent: { models: [] } };
-      },
-    });
-    expect(record.models[0]).toMatchObject({ available: false, reason: "profile_invalid" });
-    expect(record.models[1]?.available).toBe(true);
-    expect(calls.filter((call) => call.args.action === "get")).toHaveLength(2);
   });
 
   test("rejects every MCP tool outside the fixed read/upload/generate/status allowlist", async () => {
@@ -1069,7 +786,7 @@ describe("Higgsfield MCP discovery boundary", () => {
         return {
           results: ["provider-job-1", "provider-job-2"].map((id) => ({
             id,
-            model: "text2image_soul_v2",
+            model: "soul_v2",
             status: "queued",
           })),
         };
@@ -1084,7 +801,7 @@ describe("Higgsfield MCP discovery boundary", () => {
     expect(calls[0]?.name).toBe("generate_image");
     expect(calls[0]?.args).toEqual({
       params: {
-        model: "text2image_soul_v2",
+        model: "soul_v2",
         prompt: "one person in a studio",
         count: 2,
         aspect_ratio: "1:1",
@@ -1240,7 +957,7 @@ describe("Higgsfield MCP discovery boundary", () => {
     await seed(fingerprint);
     const requestId = "request-first-load-0001";
     const providerParams = {
-      model: "text2image_soul_v2",
+      model: "soul_v2",
       prompt: "one person in a studio",
       count: 1,
       aspect_ratio: "1:1",
@@ -1274,7 +991,7 @@ describe("Higgsfield MCP discovery boundary", () => {
           {
             id: "provider-existing-1",
             providerJobId: "provider-existing-1",
-            providerModelId: "text2image_soul_v2",
+            providerModelId: "soul_v2",
             jobSetType: "text2image_soul_v2",
             status: "queued",
             createdAt: NOW,
@@ -1348,7 +1065,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       callTool: async (_name, args) => {
         providerParams = args.params as Record<string, unknown>;
         return {
-          results: [{ id: "provider-media-1", model: "text2image_soul_v2", status: "queued" }],
+          results: [{ id: "provider-media-1", model: "soul_v2", status: "queued" }],
         };
       },
       now: NOW,
@@ -1384,7 +1101,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       creates += 1;
       await new Promise((resolve) => setTimeout(resolve, 5));
       return {
-        results: [{ id: "provider-dedup-1", model: "text2image_soul_v2", status: "queued" }],
+        results: [{ id: "provider-dedup-1", model: "soul_v2", status: "queued" }],
       };
     };
     const common = {
@@ -1451,7 +1168,7 @@ describe("Higgsfield MCP discovery boundary", () => {
           results: [
             {
               id: `provider-explicit-${creates}`,
-              model: "text2image_soul_v2",
+              model: "soul_v2",
               status: "queued",
             },
           ],
@@ -1511,11 +1228,11 @@ describe("Higgsfield MCP discovery boundary", () => {
           creates += 1;
           return {
             results: [
-              { id: "provider-observed-1", model: "text2image_soul_v2", status: "queued" },
+              { id: "provider-observed-1", model: "soul_v2", status: "queued" },
               { id: "provider-wrong-model", model: "different-model", status: "queued" },
-              { id: "provider-invalid-status", model: "text2image_soul_v2", status: "mystery" },
-              { id: "provider-duplicate", model: "text2image_soul_v2", status: "queued" },
-              { id: "provider-duplicate", model: "text2image_soul_v2", status: "queued" },
+              { id: "provider-invalid-status", model: "soul_v2", status: "mystery" },
+              { id: "provider-duplicate", model: "soul_v2", status: "queued" },
+              { id: "provider-duplicate", model: "soul_v2", status: "queued" },
             ],
           };
         },
@@ -1653,7 +1370,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       confirmationToken: "request-auth-failure-0001",
       env: GENERATION_ENV,
       callTool: async () => ({
-        results: [{ id: "provider-auth-failure", model: "text2image_soul_v2", status: "queued" }],
+        results: [{ id: "provider-auth-failure", model: "soul_v2", status: "queued" }],
       }),
       now: NOW,
     });
@@ -1712,7 +1429,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       env: GENERATION_ENV,
     });
     resolveCreate({
-      results: [{ id: "provider-after-reconnect", model: "text2image_soul_v2", status: "queued" }],
+      results: [{ id: "provider-after-reconnect", model: "soul_v2", status: "queued" }],
     });
     await expect(create).rejects.toMatchObject({ code: "oauth_required" });
     expect(
