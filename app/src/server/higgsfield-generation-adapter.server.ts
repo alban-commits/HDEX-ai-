@@ -190,6 +190,14 @@ function extractMediaIds(params: Record<string, unknown>): string[] {
   if (!Array.isArray(params.medias)) return [];
   const ids = params.medias.flatMap((item) => {
     if (!isRecord(item)) return [];
+    if ("data" in item || item.role === "image") {
+      if (item.role !== "image" || !isRecord(item.data) || item.data.type !== "media_input") {
+        return [];
+      }
+      const wrapped = safeId(item.data.id);
+      if (!wrapped || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(wrapped)) return [];
+      return [wrapped];
+    }
     const direct = safeId(item.id ?? item.value ?? item.media_id);
     if (direct) return [direct];
     if (isRecord(item.media)) {

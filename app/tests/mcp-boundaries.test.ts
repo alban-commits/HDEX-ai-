@@ -1804,6 +1804,145 @@ describe("Higgsfield MCP discovery boundary", () => {
     clearHiggsfieldRuntime(fingerprint);
   });
 
+  test("accepts canonical wrapped GPT media and maps it to the discovered provider role", async () => {
+    const fingerprint = "generation-gpt-wrapped-media-session";
+    await seed(fingerprint);
+    await registerGenerationMedia({
+      sessionFingerprint: fingerprint,
+      mediaId: "confirmed-gpt-media-1",
+      env: GENERATION_ENV,
+      now: NOW,
+    });
+    let creates = 0;
+    let providerParams: Record<string, unknown> | undefined;
+    const jobs = await createHiggsfieldGeneration({
+      fingerprint,
+      session,
+      jobSetType: "gpt_image_2",
+      params: {
+        prompt: "one product in a studio",
+        batch_size: 1,
+        aspect_ratio: "1:1",
+        resolution: "2k",
+        quality: "high",
+        medias: [
+          {
+            role: "image",
+            data: { id: "confirmed-gpt-media-1", type: "media_input" },
+          },
+        ],
+      },
+      confirmationToken: "request-gpt-wrapped-media-0001",
+      env: GENERATION_ENV,
+      callTool: async (name, args) => {
+        creates += 1;
+        expect(name).toBe("generate_image");
+        providerParams = args.params as Record<string, unknown>;
+        return {
+          structuredContent: {
+            results: [
+              { id: "provider-gpt-wrapped-media-1", model: "gpt_image_2", status: "queued" },
+            ],
+          },
+        };
+      },
+      now: NOW,
+    });
+    expect(jobs).toEqual([
+      expect.objectContaining({ id: "provider-gpt-wrapped-media-1", status: "queued" }),
+    ]);
+    expect(creates).toBe(1);
+    expect(providerParams).toMatchObject({
+      model: "gpt_image_2",
+      medias: [{ role: "reference", value: "confirmed-gpt-media-1" }],
+    });
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("rejects unregistered or malformed wrapped GPT media before generation", async () => {
+    const registeredId = "confirmed-gpt-media-invalid-cases";
+    const scenarios: Array<{ name: string; medias: unknown[]; registerElsewhere?: boolean }> = [
+      {
+        name: "different-session",
+        medias: [{ role: "image", data: { id: registeredId, type: "media_input" } }],
+        registerElsewhere: true,
+      },
+      {
+        name: "wrong-role",
+        medias: [{ role: "reference", data: { id: registeredId, type: "media_input" } }],
+      },
+      {
+        name: "wrong-type",
+        medias: [{ role: "image", data: { id: registeredId, type: "external_url" } }],
+      },
+      {
+        name: "missing-data",
+        medias: [{ role: "image" }],
+      },
+      {
+        name: "duplicate-id",
+        medias: [
+          { role: "image", data: { id: registeredId, type: "media_input" } },
+          { role: "image", data: { id: registeredId, type: "media_input" } },
+        ],
+      },
+      {
+        name: "url-id",
+        medias: [
+          { role: "image", data: { id: "https://example.invalid/image", type: "media_input" } },
+        ],
+      },
+      {
+        name: "blob-id",
+        medias: [{ role: "image", data: { id: "blob:local-preview", type: "media_input" } }],
+      },
+    ];
+    for (const [index, scenario] of scenarios.entries()) {
+      const fingerprint = `generation-gpt-invalid-media-${index}`;
+      const registrationFingerprint = scenario.registerElsewhere
+        ? `${fingerprint}-other`
+        : fingerprint;
+      await seed(fingerprint);
+      await registerGenerationMedia({
+        sessionFingerprint: registrationFingerprint,
+        mediaId: registeredId,
+        env: GENERATION_ENV,
+        now: NOW,
+      });
+      let creates = 0;
+      const error = await capturedError(() =>
+        createHiggsfieldGeneration({
+          fingerprint,
+          session,
+          jobSetType: "gpt_image_2",
+          params: {
+            prompt: "one product in a studio",
+            batch_size: 1,
+            aspect_ratio: "1:1",
+            resolution: "2k",
+            quality: "high",
+            medias: scenario.medias,
+          },
+          confirmationToken: `request-gpt-invalid-media-${index}`,
+          env: GENERATION_ENV,
+          callTool: async () => {
+            creates += 1;
+            return {};
+          },
+          now: NOW,
+        }),
+      );
+      expect(error).toMatchObject({ code: "invalid_media", status: 400 });
+      expect(creates).toBe(0);
+      await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+      if (registrationFingerprint !== fingerprint) {
+        await clearGenerationRuntime(registrationFingerprint, GENERATION_ENV);
+      }
+      clearHiggsfieldRuntime(fingerprint);
+    }
+  });
+
   test("coalesces concurrent identical button attempts and polls only the known provider job", async () => {
     const fingerprint = "generation-dedup-session";
     await seed(fingerprint);
