@@ -3,6 +3,7 @@ import {
   callHiggsfieldMcpTool,
   getHiggsfieldCapabilityRecord,
   HiggsfieldMcpError,
+  parseHiggsfieldMcpContent,
   requireDiscoveredModel,
   type DiscoveredModelProfile,
 } from "./higgsfield-mcp.server";
@@ -74,17 +75,8 @@ function structuredGenerationContent(value: unknown): {
   content: Record<string, unknown>;
   toolError: boolean;
 } {
-  if (!isRecord(value)) {
-    throw new ApiJobError(
-      "outcome_unknown",
-      "Higgsfield 생성 접수 결과를 확인할 수 없습니다. 자동 재시도하지 않았습니다.",
-      { status: 502 },
-    );
-  }
-  if (isRecord(value.structuredContent)) {
-    return { content: value.structuredContent, toolError: value.isError === true };
-  }
-  return { content: value, toolError: value.isError === true };
+  const parsed = parseHiggsfieldMcpContent(value, { strictText: true });
+  return { content: parsed.content, toolError: parsed.isError };
 }
 
 function responseRequestId(content: Record<string, unknown>): string | null {

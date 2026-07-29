@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { HiggsfieldOAuthSession } from "./higgsfield-oauth.server";
@@ -376,25 +377,71 @@ function toolContractValid(tool: DiscoveredTool): boolean {
   return true;
 }
 
-function structuredContent(value: unknown): Record<string, unknown> {
+export function parseHiggsfieldMcpContent(
+  value: unknown,
+  options: { strictText?: boolean } = {},
+): { content: Record<string, unknown>; isError: boolean } {
   if (!isRecord(value)) throw new HiggsfieldMcpError("invalid_response");
-  if (value.isError === true) throw new HiggsfieldMcpError("provider_failure");
-  if (isRecord(value.structuredContent)) return value.structuredContent;
+  const isEnvelope =
+    Object.hasOwn(value, "structuredContent") ||
+    Object.hasOwn(value, "content") ||
+    Object.hasOwn(value, "isError");
+  if (!isEnvelope) return { content: value, isError: false };
+  const candidates: Record<string, unknown>[] = [];
+  if (isRecord(value.structuredContent)) candidates.push(value.structuredContent);
+  else if (
+    options.strictText &&
+    value.structuredContent !== undefined &&
+    value.structuredContent !== null
+  ) {
+    throw new HiggsfieldMcpError("invalid_response");
+  }
+  let totalTextBytes = 0;
   if (Array.isArray(value.content)) {
     for (const item of value.content) {
       if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
-      if (Buffer.byteLength(item.text) > HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) {
+      totalTextBytes += Buffer.byteLength(item.text);
+      if (totalTextBytes > HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) {
         throw new HiggsfieldMcpError("response_limit");
       }
       try {
         const parsed = JSON.parse(item.text) as unknown;
-        if (isRecord(parsed)) return parsed;
+        if (isRecord(parsed)) {
+          candidates.push(parsed);
+          continue;
+        }
       } catch {
-        continue;
+        // Strict generation parsing fails closed below without retaining raw text.
       }
+      if (options.strictText) throw new HiggsfieldMcpError("invalid_response");
     }
   }
-  throw new HiggsfieldMcpError("invalid_response");
+  if (candidates.length === 0) throw new HiggsfieldMcpError("invalid_response");
+  try {
+    const firstSerialized = JSON.stringify(candidates[0]);
+    if (Buffer.byteLength(firstSerialized) > HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) {
+      throw new HiggsfieldMcpError("response_limit");
+    }
+    for (const candidate of candidates.slice(1)) {
+      const serialized = JSON.stringify(candidate);
+      if (Buffer.byteLength(serialized) > HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) {
+        throw new HiggsfieldMcpError("response_limit");
+      }
+      if (!isDeepStrictEqual(candidate, candidates[0])) {
+        throw new HiggsfieldMcpError("invalid_response");
+      }
+    }
+  } catch (error) {
+    if (error instanceof HiggsfieldMcpError) throw error;
+    throw new HiggsfieldMcpError("invalid_response");
+  }
+  return { content: candidates[0]!, isError: value.isError === true };
+}
+
+function structuredContent(value: unknown): Record<string, unknown> {
+  const parsed = parseHiggsfieldMcpContent(value);
+  if (parsed.isError) throw new HiggsfieldMcpError("provider_failure");
+  return parsed.content;
 }
 
 type SearchModel = {

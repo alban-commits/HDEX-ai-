@@ -7,6 +7,7 @@ import {
   clearHiggsfieldRuntime,
   getHiggsfieldCapabilitySummary,
   HiggsfieldMcpError,
+  HIGGSFIELD_MCP_MAX_RESPONSE_BYTES,
   HIGGSFIELD_MCP_TIMEOUT_MS,
   inspectHiggsfieldCapabilities,
   inspectHiggsfieldProvider,
@@ -933,6 +934,161 @@ describe("Higgsfield MCP discovery boundary", () => {
     ]);
     await clearGenerationRuntime(fingerprint, GENERATION_ENV);
     clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("accepts a standard MCP text content generation response", async () => {
+    const fingerprint = "generation-text-content-success-session";
+    await seed(fingerprint);
+    let creates = 0;
+    const jobs = await createHiggsfieldGeneration({
+      fingerprint,
+      session,
+      jobSetType: "text2image_soul_v2",
+      params: {
+        prompt: "one person in a studio",
+        batch_size: 1,
+        aspect_ratio: "1:1",
+        quality: "1080p",
+        medias: [],
+      },
+      confirmationToken: "request-text-content-success-0001",
+      env: GENERATION_ENV,
+      callTool: async () => {
+        creates += 1;
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                request_id: "safe-text-request-1",
+                results: [
+                  { id: "provider-text-content-1", model: "soul_v2", status: "queued" },
+                ],
+              }),
+            },
+          ],
+        };
+      },
+      now: NOW,
+    });
+    expect(jobs).toEqual([
+      expect.objectContaining({ id: "provider-text-content-1", status: "queued" }),
+    ]);
+    expect(creates).toBe(1);
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("classifies an isError text content credit response without exposing provider text", async () => {
+    const fingerprint = "generation-text-content-credit-session";
+    await seed(fingerprint);
+    let creates = 0;
+    const providerMessage =
+      "insufficient credit balance token=private-text-token https://private.example/result";
+    const error = await capturedError(() =>
+      createHiggsfieldGeneration({
+        fingerprint,
+        session,
+        jobSetType: "text2image_soul_v2",
+        params: {
+          prompt: "one person in a studio",
+          batch_size: 1,
+          aspect_ratio: "1:1",
+          quality: "1080p",
+          medias: [],
+        },
+        confirmationToken: "request-text-content-credit-0001",
+        env: GENERATION_ENV,
+        callTool: async () => {
+          creates += 1;
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  request_id: "safe-text-request-2",
+                  error: providerMessage,
+                }),
+              },
+            ],
+          };
+        },
+        now: NOW,
+      }),
+    );
+    expect(error).toMatchObject({ code: "insufficient_credits", status: 402 });
+    expect(JSON.stringify(error)).not.toContain(providerMessage);
+    expect(JSON.stringify(error)).not.toContain("private-text-token");
+    expect(JSON.stringify(error)).not.toContain("private.example");
+    expect(creates).toBe(1);
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("fails closed on malformed, oversized, or ambiguous text content without retry", async () => {
+    const cases: Array<{ name: string; content: Array<{ type: "text"; text: string }> }> = [
+      {
+        name: "malformed",
+        content: [{ type: "text", text: '{"results":' }],
+      },
+      {
+        name: "oversized",
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ padding: "x".repeat(HIGGSFIELD_MCP_MAX_RESPONSE_BYTES) }),
+          },
+        ],
+      },
+      {
+        name: "ambiguous",
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              results: [{ id: "provider-ambiguous-1", model: "soul_v2", status: "queued" }],
+            }),
+          },
+          {
+            type: "text",
+            text: JSON.stringify({
+              results: [{ id: "provider-ambiguous-2", model: "soul_v2", status: "queued" }],
+            }),
+          },
+        ],
+      },
+    ];
+    for (const scenario of cases) {
+      const fingerprint = `generation-text-${scenario.name}-session`;
+      await seed(fingerprint);
+      let creates = 0;
+      const error = await capturedError(() =>
+        createHiggsfieldGeneration({
+          fingerprint,
+          session,
+          jobSetType: "text2image_soul_v2",
+          params: {
+            prompt: "one person in a studio",
+            batch_size: 1,
+            aspect_ratio: "1:1",
+            quality: "1080p",
+            medias: [],
+          },
+          confirmationToken: `request-text-${scenario.name}-0001`,
+          env: GENERATION_ENV,
+          callTool: async () => {
+            creates += 1;
+            return { content: scenario.content };
+          },
+          now: NOW,
+        }),
+      );
+      expect(error).toMatchObject({ code: "outcome_unknown", status: 502 });
+      expect(creates).toBe(1);
+      await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+      clearHiggsfieldRuntime(fingerprint);
+    }
   });
 
   test("keeps malformed or missing generation results outcome-unknown without retry", async () => {
