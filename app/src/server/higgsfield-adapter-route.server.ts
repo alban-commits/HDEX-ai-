@@ -3,6 +3,7 @@ import {
   createHiggsfieldGeneration,
   getHiggsfieldGeneration,
   listHiggsfieldGenerations,
+  type HiggsfieldGenerationDiagnostic,
 } from "./higgsfield-generation-adapter.server";
 import { higgsfieldOAuthSessionFingerprint } from "./higgsfield-oauth.server";
 import {
@@ -65,6 +66,7 @@ async function readInput(request: Request): Promise<Record<string, unknown>> {
 type AdapterRouteOptions = {
   requireActiveOAuthSession?: (request: Request) => Promise<ActiveOAuthSession | null>;
   logDiagnostic?: (line: string) => void;
+  createGeneration?: typeof createHiggsfieldGeneration;
 };
 
 export async function handleHiggsfieldAdapter(
@@ -74,6 +76,7 @@ export async function handleHiggsfieldAdapter(
   const headers = new Headers(NO_STORE_HEADERS);
   let fingerprint: string | undefined;
   let operationName: string | null = null;
+  let generationDiagnostic: HiggsfieldGenerationDiagnostic | undefined;
   const respond = (value: unknown, status: number, errorCode: string): Response => {
     const safeErrorCode = /^[a-z0-9_]{1,64}$/.test(errorCode) ? errorCode : "unexpected";
     (options.logDiagnostic ?? console.info)(
@@ -83,6 +86,7 @@ export async function handleHiggsfieldAdapter(
         operation: operationName,
         status,
         errorCode: safeErrorCode,
+        ...(generationDiagnostic ?? {}),
       }),
     );
     return jsonNoStore(value, { status, headers });
@@ -145,12 +149,24 @@ export async function handleHiggsfieldAdapter(
             accessToken: active.session.accessToken,
           });
         }
-        value = await createHiggsfieldGeneration({
+        value = await (options.createGeneration ?? createHiggsfieldGeneration)({
           fingerprint,
           session: active.session,
           jobSetType: data.jobSetType,
           params: data.params,
           confirmationToken: data.confirmationToken,
+          onGenerationDiagnostic: (diagnostic) => {
+            generationDiagnostic = {
+              generationStage: "generate_image",
+              providerErrorPresent: diagnostic.providerErrorPresent === true,
+              resultCount: Math.min(Math.max(Math.trunc(diagnostic.resultCount), 0), 10_000),
+              jobIdPresent: diagnostic.jobIdPresent === true,
+              requestDurationMs: Math.min(
+                Math.max(Math.trunc(diagnostic.requestDurationMs), 0),
+                300_000,
+              ),
+            };
+          },
         });
         break;
       case "getJob":

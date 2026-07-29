@@ -1010,6 +1010,7 @@ export async function callHiggsfieldMcpTool(input: {
   name: HiggsfieldMcpToolName;
   args: Record<string, unknown>;
   fetchImpl?: typeof fetch;
+  preserveToolResult?: boolean;
 }): Promise<Record<string, unknown>> {
   if (!(REQUIRED_TOOLS as readonly string[]).includes(input.name)) {
     throw new HiggsfieldMcpError("capability_required");
@@ -1018,13 +1019,19 @@ export async function callHiggsfieldMcpTool(input: {
     mcpUrl: input.session.resource,
     accessToken: input.session.accessToken,
     fetchImpl: input.fetchImpl,
-    operation: async (client, signal) =>
-      structuredContent(
-        await client.callTool({ name: input.name, arguments: input.args }, undefined, {
+    operation: async (client, signal) => {
+      const result = await client.callTool(
+        { name: input.name, arguments: input.args },
+        undefined,
+        {
           signal,
           timeout: HIGGSFIELD_MCP_TIMEOUT_MS,
           maxTotalTimeout: HIGGSFIELD_MCP_TIMEOUT_MS,
-        }),
-      ),
+        },
+      );
+      if (!input.preserveToolResult) return structuredContent(result);
+      if (!isRecord(result)) throw new HiggsfieldMcpError("invalid_response");
+      return result;
+    },
   });
 }

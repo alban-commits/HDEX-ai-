@@ -7,6 +7,7 @@ import {
   clearHiggsfieldRuntime,
   getHiggsfieldCapabilitySummary,
   HiggsfieldMcpError,
+  HIGGSFIELD_MCP_TIMEOUT_MS,
   inspectHiggsfieldCapabilities,
   inspectHiggsfieldProvider,
   type HiggsfieldCapabilityRecord,
@@ -221,6 +222,15 @@ async function seed(fingerprint: string): Promise<HiggsfieldCapabilityRecord> {
     now: NOW,
     runner: async () => record,
   });
+}
+
+async function capturedError(operation: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await operation();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("expected operation to fail");
 }
 
 describe("Higgsfield MCP discovery boundary", () => {
@@ -809,6 +819,232 @@ describe("Higgsfield MCP discovery boundary", () => {
         medias: [],
       },
     });
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("classifies explicit generation credit and provider errors before results without retry", async () => {
+    for (const scenario of [
+      {
+        fingerprint: "generation-credit-error-session",
+        requestId: "request-credit-error-0001",
+        providerError: "insufficient credit balance token=private-provider-token",
+        expectedCode: "insufficient_credits",
+      },
+      {
+        fingerprint: "generation-provider-error-session",
+        requestId: "request-provider-error-0001",
+        providerError: "provider rejected prompt at https://private.example/result",
+        expectedCode: "provider_failure",
+      },
+    ]) {
+      await seed(scenario.fingerprint);
+      let creates = 0;
+      const diagnostics: unknown[] = [];
+      const error = await capturedError(() =>
+        createHiggsfieldGeneration({
+          fingerprint: scenario.fingerprint,
+          session,
+          jobSetType: "text2image_soul_v2",
+          params: {
+            prompt: "one person in a studio",
+            batch_size: 1,
+            aspect_ratio: "1:1",
+            quality: "1080p",
+            medias: [],
+          },
+          confirmationToken: scenario.requestId,
+          env: GENERATION_ENV,
+          callTool: async () => {
+            creates += 1;
+            const content = {
+              request_id: "safe-provider-request-1",
+              error: scenario.providerError,
+              results: [{ id: "ignored-job", model: "soul_v2", status: "queued" }],
+            };
+            return scenario.expectedCode === "insufficient_credits"
+              ? { isError: true, structuredContent: content }
+              : content;
+          },
+          onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+          now: NOW,
+        }),
+      );
+      expect(error).toMatchObject({ code: scenario.expectedCode });
+      expect(JSON.stringify(error)).not.toContain(scenario.providerError);
+      expect(JSON.stringify(error)).not.toContain("private-provider-token");
+      expect(JSON.stringify(error)).not.toContain("private.example");
+      expect(creates).toBe(1);
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          generationStage: "generate_image",
+          providerErrorPresent: true,
+          resultCount: 1,
+          jobIdPresent: true,
+        }),
+      ]);
+      expect(JSON.stringify(diagnostics)).not.toContain("safe-provider-request-1");
+      await clearGenerationRuntime(scenario.fingerprint, GENERATION_ENV);
+      clearHiggsfieldRuntime(scenario.fingerprint);
+    }
+  });
+
+  test("accepts one structured queued job with validated model lineage", async () => {
+    const fingerprint = "generation-structured-success-session";
+    await seed(fingerprint);
+    let creates = 0;
+    const diagnostics: unknown[] = [];
+    const jobs = await createHiggsfieldGeneration({
+      fingerprint,
+      session,
+      jobSetType: "text2image_soul_v2",
+      params: {
+        prompt: "one person in a studio",
+        batch_size: 1,
+        aspect_ratio: "1:1",
+        quality: "1080p",
+        medias: [],
+      },
+      confirmationToken: "request-structured-success-0001",
+      env: GENERATION_ENV,
+      callTool: async () => {
+        creates += 1;
+        return {
+          structuredContent: {
+            request_id: "safe-provider-request-2",
+            results: [{ id: "provider-structured-1", model: "soul_v2", status: "queued" }],
+          },
+        };
+      },
+      onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      now: NOW,
+    });
+    expect(jobs).toEqual([
+      expect.objectContaining({ id: "provider-structured-1", status: "queued" }),
+    ]);
+    expect(creates).toBe(1);
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        generationStage: "generate_image",
+        providerErrorPresent: false,
+        resultCount: 1,
+        jobIdPresent: true,
+      }),
+    ]);
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("keeps malformed or missing generation results outcome-unknown without retry", async () => {
+    for (const [index, response] of [
+      { structuredContent: { request_id: "safe-malformed-1" } },
+      { structuredContent: { results: ["not-a-job"] } },
+    ].entries()) {
+      const fingerprint = `generation-malformed-session-${index}`;
+      await seed(fingerprint);
+      let creates = 0;
+      const error = await capturedError(() =>
+        createHiggsfieldGeneration({
+          fingerprint,
+          session,
+          jobSetType: "text2image_soul_v2",
+          params: {
+            prompt: "one person in a studio",
+            batch_size: 1,
+            aspect_ratio: "1:1",
+            quality: "1080p",
+            medias: [],
+          },
+          confirmationToken: `request-malformed-${index}-0001`,
+          env: GENERATION_ENV,
+          callTool: async () => {
+            creates += 1;
+            return response;
+          },
+          now: NOW,
+        }),
+      );
+      expect(error).toMatchObject({ code: "outcome_unknown", status: 502 });
+      expect(creates).toBe(1);
+      await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+      clearHiggsfieldRuntime(fingerprint);
+    }
+  });
+
+  test("keeps the current MCP timeout and does not retry an uncertain timed-out create", async () => {
+    const fingerprint = "generation-timeout-session";
+    await seed(fingerprint);
+    let creates = 0;
+    expect(HIGGSFIELD_MCP_TIMEOUT_MS).toBe(25_000);
+    const error = await capturedError(() =>
+      createHiggsfieldGeneration({
+        fingerprint,
+        session,
+        jobSetType: "text2image_soul_v2",
+        params: {
+          prompt: "one person in a studio",
+          batch_size: 1,
+          aspect_ratio: "1:1",
+          quality: "1080p",
+          medias: [],
+        },
+        confirmationToken: "request-timeout-0001",
+        env: GENERATION_ENV,
+        callTool: async () => {
+          creates += 1;
+          throw new HiggsfieldMcpError("timeout");
+        },
+        now: NOW,
+      }),
+    );
+    expect(error).toMatchObject({ code: "outcome_unknown", status: 502 });
+    expect(creates).toBe(1);
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("rejects a structured generation from a different model without storing it", async () => {
+    const fingerprint = "generation-model-mismatch-session";
+    await seed(fingerprint);
+    let creates = 0;
+    const error = await capturedError(() =>
+      createHiggsfieldGeneration({
+        fingerprint,
+        session,
+        jobSetType: "text2image_soul_v2",
+        params: {
+          prompt: "one person in a studio",
+          batch_size: 1,
+          aspect_ratio: "1:1",
+          quality: "1080p",
+          medias: [],
+        },
+        confirmationToken: "request-model-mismatch-0001",
+        env: GENERATION_ENV,
+        callTool: async () => {
+          creates += 1;
+          return {
+            structuredContent: {
+              results: [
+                { id: "provider-wrong-model-only", model: "soul_2", status: "queued" },
+              ],
+            },
+          };
+        },
+        now: NOW,
+      }),
+    );
+    expect(error).toMatchObject({ code: "job_mismatch", status: 502 });
+    expect(creates).toBe(1);
+    await expect(
+      getHiggsfieldGeneration({
+        fingerprint,
+        session,
+        jobId: "provider-wrong-model-only",
+        env: GENERATION_ENV,
+        now: NOW,
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
     await clearGenerationRuntime(fingerprint, GENERATION_ENV);
     clearHiggsfieldRuntime(fingerprint);
   });

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ApiJobError } from "@higgsfield/fnf/errors";
 import { normalizeCatastrophicResponse } from "../src/server";
 import { handleHiggsfieldAdapter } from "../src/server/higgsfield-adapter-route.server";
 import { higgsfieldOAuthSessionFingerprint } from "../src/server/higgsfield-oauth.server";
@@ -45,6 +46,36 @@ async function expectSafeJson(response: Response, status: number) {
   return response.json() as Promise<Record<string, unknown>>;
 }
 
+function soulCapabilityRecord(now: number): HiggsfieldCapabilityRecord {
+  return {
+    checkedAt: now,
+    expiresAt: now + 60_000,
+    toolCount: 5,
+    pageCount: 1,
+    tools: [],
+    models: [
+      {
+        key: "soul_2",
+        displayName: "Soul 2",
+        available: true,
+        modelId: "soul_v2",
+        modelName: "Higgsfield Soul 2.0",
+        parameterOptions: {
+          aspect_ratio: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"],
+          quality: ["1.5k", "2k"],
+        },
+        aspectRatios: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"],
+        aspectRatioParameter: "aspect_ratio",
+        resolutionParameter: "quality",
+        resolutionValue: "2k",
+        mediaRole: "reference",
+        maximumImages: 1,
+        inputContractHash: "sha256:test-only-contract",
+      },
+    ],
+  };
+}
+
 describe("Higgsfield adapter JSON boundary", () => {
   test("returns an unauthenticated adapter response as no-store JSON", async () => {
     const diagnostics: string[] = [];
@@ -70,33 +101,7 @@ describe("Higgsfield adapter JSON boundary", () => {
   test("returns generation disabled as JSON before invoking a provider", async () => {
     const fingerprint = higgsfieldOAuthSessionFingerprint(activeSession.session);
     const now = Date.now();
-    const record: HiggsfieldCapabilityRecord = {
-      checkedAt: now,
-      expiresAt: now + 60_000,
-      toolCount: 5,
-      pageCount: 1,
-      tools: [],
-      models: [
-        {
-          key: "soul_2",
-          displayName: "Soul 2",
-          available: true,
-          modelId: "soul_v2",
-          modelName: "Higgsfield Soul 2.0",
-          parameterOptions: {
-            aspect_ratio: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"],
-            quality: ["1.5k", "2k"],
-          },
-          aspectRatios: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"],
-          aspectRatioParameter: "aspect_ratio",
-          resolutionParameter: "quality",
-          resolutionValue: "2k",
-          mediaRole: "reference",
-          maximumImages: 1,
-          inputContractHash: "sha256:test-only-contract",
-        },
-      ],
-    };
+    const record = soulCapabilityRecord(now);
     await inspectHiggsfieldCapabilities({
       sessionFingerprint: fingerprint,
       mcpUrl: activeSession.config.mcpUrl,
@@ -158,6 +163,82 @@ describe("Higgsfield adapter JSON boundary", () => {
       } else {
         process.env.HDEX_GENERATION_ENABLED = previousGenerationEnabled;
       }
+    }
+  });
+
+  test("marks an outcome-unknown create response and logs only bounded generation diagnostics", async () => {
+    const fingerprint = higgsfieldOAuthSessionFingerprint(activeSession.session);
+    const now = Date.now();
+    await inspectHiggsfieldCapabilities({
+      sessionFingerprint: fingerprint,
+      mcpUrl: activeSession.config.mcpUrl,
+      accessToken: activeSession.session.accessToken,
+      now,
+      runner: async () => soulCapabilityRecord(now),
+    });
+    const diagnostics: string[] = [];
+    try {
+      const response = await handleHiggsfieldAdapter(
+        adapterRequest(
+          JSON.stringify({
+            operation: "createJobs",
+            data: {
+              jobSetType: "text2image_soul_v2",
+              params: {
+                prompt: "private prompt",
+                batch_size: 1,
+                aspect_ratio: "1:1",
+                quality: "1080p",
+                medias: [],
+              },
+              confirmationToken: "private-request-id",
+            },
+          }),
+        ),
+        {
+          requireActiveOAuthSession: async () => activeSession,
+          logDiagnostic: (line) => diagnostics.push(line),
+          createGeneration: async (input) => {
+            input.onGenerationDiagnostic?.({
+              generationStage: "generate_image",
+              providerErrorPresent: false,
+              resultCount: 0,
+              jobIdPresent: false,
+              requestDurationMs: 24_500,
+            });
+            throw new ApiJobError(
+              "outcome_unknown",
+              "Higgsfield 생성 접수 결과를 확인할 수 없습니다.",
+              { status: 502 },
+            );
+          },
+        },
+      );
+      const body = await expectSafeJson(response, 502);
+      expect(body).toMatchObject({
+        ok: false,
+        error: { code: "outcome_unknown", status: 502 },
+      });
+      expect(JSON.stringify(body)).not.toContain("generationStage");
+      expect(JSON.stringify(body)).not.toContain("requestDurationMs");
+      expect(diagnostics).toHaveLength(1);
+      expect(JSON.parse(diagnostics[0]!)).toEqual({
+        event: "higgsfield_adapter_response",
+        routeReached: true,
+        operation: "createJobs",
+        status: 502,
+        errorCode: "outcome_unknown",
+        generationStage: "generate_image",
+        providerErrorPresent: false,
+        resultCount: 0,
+        jobIdPresent: false,
+        requestDurationMs: 24_500,
+      });
+      expect(diagnostics[0]).not.toContain("private prompt");
+      expect(diagnostics[0]).not.toContain("private-request-id");
+      expect(diagnostics[0]).not.toContain(activeSession.session.accessToken);
+    } finally {
+      clearHiggsfieldRuntime(fingerprint);
     }
   });
 
