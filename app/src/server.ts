@@ -1,8 +1,8 @@
 import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
-import { renderErrorPage } from "./lib/error-page";
 import { applySecurityHeaders } from "./lib/security-headers.server";
+import { isApiRequest, unexpectedRequestErrorResponse } from "./server/http.server";
 import { startTemporaryStorageMaintenance } from "./server/temporary-storage.server";
 
 type ServerEntry = {
@@ -22,21 +22,26 @@ async function getServerEntry(): Promise<ServerEntry> {
 
 // h3 swallows in-handler throws into a normal 500 Response with body
 // {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
-async function normalizeCatastrophicSsrResponse(response: Response): Promise<Response> {
-  if (response.status < 500) return response;
+export async function normalizeCatastrophicResponse(
+  request: Request,
+  response: Response,
+): Promise<Response> {
+  if (response.status < 400) return response;
   const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) return response;
+  if (isApiRequest(request) && !contentType.includes("application/json")) {
+    console.error("api_request_failed");
+    return unexpectedRequestErrorResponse(request, response.status);
+  }
+  if (response.status < 500 || !contentType.includes("application/json")) return response;
 
   const body = await response.clone().text();
   if (!body.includes('"unhandled":true') || !body.includes('"message":"HTTPError"')) {
     return response;
   }
 
-  console.error(consumeLastCapturedError() ?? new Error(`h3 swallowed SSR error: ${body}`));
-  return new Response(renderErrorPage(), {
-    status: 500,
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+  const captured = consumeLastCapturedError() ?? new Error(`h3 swallowed SSR error: ${body}`);
+  console.error(isApiRequest(request) ? "api_request_failed" : captured);
+  return unexpectedRequestErrorResponse(request);
 }
 
 export default {
@@ -45,15 +50,10 @@ export default {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request);
-      return applySecurityHeaders(await normalizeCatastrophicSsrResponse(response));
+      return applySecurityHeaders(await normalizeCatastrophicResponse(request, response));
     } catch (error) {
-      console.error(error);
-      return applySecurityHeaders(
-        new Response(renderErrorPage(), {
-          status: 500,
-          headers: { "content-type": "text/html; charset=utf-8" },
-        }),
-      );
+      console.error(isApiRequest(request) ? "api_request_failed" : error);
+      return applySecurityHeaders(unexpectedRequestErrorResponse(request));
     }
   },
 };

@@ -1,4 +1,38 @@
+import { renderErrorPage } from "../lib/error-page";
+
 export const NO_STORE_HEADERS = { "Cache-Control": "no-store" } as const;
+export const HDEX_API_RESPONSE_HEADER = "X-HDEX-API-Response";
+
+export function jsonNoStore(value: unknown, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("Cache-Control", "no-store");
+  headers.set(HDEX_API_RESPONSE_HEADER, "1");
+  return Response.json(value, { ...init, headers });
+}
+
+export function isApiRequest(request: Request): boolean {
+  const pathname = new URL(request.url).pathname;
+  return pathname === "/api" || pathname.startsWith("/api/");
+}
+
+export function unexpectedRequestErrorResponse(request: Request, status = 500): Response {
+  if (isApiRequest(request)) {
+    return jsonNoStore(
+      {
+        ok: false,
+        error: {
+          code: "unexpected",
+          message: "서버 연결 요청을 처리하지 못했습니다.",
+        },
+      },
+      { status },
+    );
+  }
+  return new Response(renderErrorPage(), {
+    status: 500,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+}
 
 export function readCookie(request: Request, name: string): string | undefined {
   const header = request.headers.get("cookie");

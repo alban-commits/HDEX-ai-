@@ -116,6 +116,105 @@ test("notifies the existing sign-in flow when an adapter response requires OAuth
   }
 });
 
+test("distinguishes an Access redirect without following or exposing its URL", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestInit: RequestInit | undefined;
+  let notifications = 0;
+  const unsubscribe = subscribeHiggsfieldReconnect(() => {
+    notifications += 1;
+  });
+  const responses = [
+    {
+      status: 0,
+      type: "opaque",
+      redirected: false,
+      url: "https://access.example/login?token=private-access-query",
+      headers: new Headers(),
+      bodyUsed: false,
+    },
+    {
+      status: 200,
+      type: "opaqueredirect",
+      redirected: false,
+      url: "https://access.example/login?token=private-access-query",
+      headers: new Headers(),
+      bodyUsed: false,
+    },
+  ] as Response[];
+  let responseIndex = 0;
+  globalThis.fetch = async (_input, init) => {
+    requestInit = init;
+    return responses[responseIndex++]!;
+  };
+  try {
+    for (const response of responses) {
+      let thrown: unknown;
+      try {
+        await fnfBrowserAdapter.getUser();
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toMatchObject({ code: "access_session_required" });
+      expect(JSON.stringify(thrown)).not.toContain("private-access-query");
+      expect(response.bodyUsed).toBe(false);
+    }
+    expect(requestInit?.redirect).toBe("manual");
+    expect(new Headers(requestInit?.headers).get("accept")).toBe("application/json");
+    expect(notifications).toBe(0);
+  } finally {
+    unsubscribe();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("normalizes an app non-JSON response without reading or exposing its HTML", async () => {
+  const originalFetch = globalThis.fetch;
+  const html = "<!doctype html><p>private-token private-cookie</p>";
+  const response = new Response(html, {
+    status: 500,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+  globalThis.fetch = async () => response;
+  try {
+    let thrown: unknown;
+    try {
+      await fnfBrowserAdapter.getUser();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "adapter_non_json_response" });
+    expect(thrown).not.toBeInstanceOf(SyntaxError);
+    expect(response.bodyUsed).toBe(false);
+    expect(JSON.stringify(thrown)).not.toContain("private-token");
+    expect(JSON.stringify(thrown)).not.toContain("private-cookie");
+    expect(JSON.stringify(thrown)).not.toContain("<!doctype html>");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("normalizes malformed JSON without exposing the parser or response body", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response('{"private_token":', {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
+  try {
+    let thrown: unknown;
+    try {
+      await fnfBrowserAdapter.getUser();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "adapter_invalid_json_response" });
+    expect(thrown).not.toBeInstanceOf(SyntaxError);
+    expect(JSON.stringify(thrown)).not.toContain("private_token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("bounds and explicitly releases local upload object URLs", async () => {
   const originalFetch = globalThis.fetch;
   const originalRevoke = URL.revokeObjectURL;

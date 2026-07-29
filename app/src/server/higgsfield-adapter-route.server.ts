@@ -14,8 +14,9 @@ import {
   appendOAuthSessionCookies,
   clearAllOAuthCookies,
   requireActiveOAuthSession,
+  type ActiveOAuthSession,
 } from "./oauth-routes.server";
-import { NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
+import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
 import {
   invalidateHiggsfieldAuthentication,
   isHiggsfieldAuthenticationFailure,
@@ -36,36 +37,62 @@ async function readInput(request: Request): Promise<Record<string, unknown>> {
   if (Buffer.byteLength(text) > MAX_JSON_BYTES) {
     throw new ApiJobError("request_too_large", "요청 크기 제한을 초과했습니다.", { status: 413 });
   }
-  const parsed = JSON.parse(text) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw new ApiJobError("validation", "요청 JSON 형식이 올바르지 않습니다.", {
+      status: 400,
+    });
+  }
   if (!isRecord(parsed)) {
     throw new ApiJobError("validation", "요청 형식이 올바르지 않습니다.", { status: 400 });
   }
   return parsed;
 }
 
-export async function handleHiggsfieldAdapter(request: Request): Promise<Response> {
-  const active = await requireActiveOAuthSession(request);
-  if (!active) {
-    const headers = new Headers(NO_STORE_HEADERS);
-    clearAllOAuthCookies(headers);
-    return Response.json(
-      {
-        ok: false,
-        error: {
-          code: "oauth_required",
-          message: "내 Higgsfield 계정을 연결해 주세요.",
-          data: { reconnectRequired: true },
-        },
-      },
-      { status: 401, headers },
-    );
-  }
-  const crossSite = rejectCrossSiteMutation(request, active.config.publicOrigin);
-  if (crossSite) return crossSite;
+type AdapterRouteOptions = {
+  requireActiveOAuthSession?: (request: Request) => Promise<ActiveOAuthSession | null>;
+};
+
+export async function handleHiggsfieldAdapter(
+  request: Request,
+  options: AdapterRouteOptions = {},
+): Promise<Response> {
   const headers = new Headers(NO_STORE_HEADERS);
-  if (active.rotatedCookies) appendOAuthSessionCookies(headers, active.rotatedCookies);
-  const fingerprint = higgsfieldOAuthSessionFingerprint(active.session);
+  let fingerprint: string | undefined;
   try {
+    const active = await (options.requireActiveOAuthSession ?? requireActiveOAuthSession)(request);
+    if (!active) {
+      clearAllOAuthCookies(headers);
+      return jsonNoStore(
+        {
+          ok: false,
+          error: {
+            code: "oauth_required",
+            message: "내 Higgsfield 계정을 연결해 주세요.",
+            data: { reconnectRequired: true },
+          },
+        },
+        { status: 401, headers },
+      );
+    }
+    const crossSite = rejectCrossSiteMutation(request, active.config.publicOrigin);
+    if (crossSite) {
+      return jsonNoStore(
+        {
+          ok: false,
+          error: {
+            code: "invalid_origin",
+            message: "요청 출처를 확인할 수 없습니다.",
+            status: crossSite.status,
+          },
+        },
+        { status: crossSite.status, headers },
+      );
+    }
+    if (active.rotatedCookies) appendOAuthSessionCookies(headers, active.rotatedCookies);
+    fingerprint = higgsfieldOAuthSessionFingerprint(active.session);
     const input = await readInput(request);
     const operation = input.operation;
     const data = isRecord(input.data) ? input.data : {};
@@ -138,11 +165,19 @@ export async function handleHiggsfieldAdapter(request: Request): Promise<Respons
           status: 405,
         });
     }
-    return Response.json({ ok: true, value }, { headers });
+    return jsonNoStore({ ok: true, value }, { headers });
   } catch (error) {
     if (isHiggsfieldAuthenticationFailure(error)) {
-      await invalidateHiggsfieldAuthentication({ headers, sessionFingerprint: fingerprint });
-      return Response.json(
+      if (fingerprint) {
+        try {
+          await invalidateHiggsfieldAuthentication({ headers, sessionFingerprint: fingerprint });
+        } catch {
+          clearAllOAuthCookies(headers);
+        }
+      } else {
+        clearAllOAuthCookies(headers);
+      }
+      return jsonNoStore(
         {
           ok: false,
           error: {
@@ -165,6 +200,9 @@ export async function handleHiggsfieldAdapter(request: Request): Promise<Respons
               status: 502,
             }
           : { code: "unexpected", message: "서버 연결 요청을 처리하지 못했습니다." };
-    return Response.json({ ok: false, error: payload }, { status: payload.status ?? 500, headers });
+    return jsonNoStore(
+      { ok: false, error: payload },
+      { status: payload.status ?? 500, headers },
+    );
   }
 }

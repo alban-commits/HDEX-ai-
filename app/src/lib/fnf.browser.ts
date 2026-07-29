@@ -46,13 +46,73 @@ export function notifyHiggsfieldReconnectRequired(): void {
 }
 
 async function adapterCall(operation: string, data: object = {}): Promise<unknown> {
-  const response = await fetch("/api/higgsfield/adapter", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ operation, data }),
-  });
-  const result = (await response.json()) as AdapterResponse;
+  let response: Response;
+  try {
+    response = await fetch("/api/higgsfield/adapter", {
+      method: "POST",
+      credentials: "include",
+      redirect: "manual",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ operation, data }),
+    });
+  } catch {
+    throwAdapterError({
+      code: "adapter_request_failed",
+      message: "서버 연결 요청을 완료하지 못했습니다.",
+    });
+  }
+  if (
+    response.status === 0 ||
+    response.type === "opaqueredirect" ||
+    response.redirected ||
+    (response.status >= 300 && response.status < 400)
+  ) {
+    throwAdapterError({
+      code: "access_session_required",
+      message: "사내 접근 세션을 확인해 주세요.",
+      status: response.status || undefined,
+    });
+  }
+  const successfulStatus = response.status >= 200 && response.status < 300;
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (contentType !== "application/json") {
+    throwAdapterError({
+      code: "adapter_non_json_response",
+      message: "서버가 올바른 API 응답을 반환하지 않았습니다.",
+      status: response.status || undefined,
+    });
+  }
+  let result: AdapterResponse;
+  try {
+    result = (await response.json()) as AdapterResponse;
+  } catch {
+    throwAdapterError({
+      code: "adapter_invalid_json_response",
+      message: "서버 API 응답을 확인하지 못했습니다.",
+      status: response.status || undefined,
+    });
+  }
+  if (
+    !isRecord(result) ||
+    typeof result.ok !== "boolean" ||
+    (result.ok === false &&
+      (!isRecord(result.error) ||
+        typeof result.error.code !== "string" ||
+        typeof result.error.message !== "string"))
+  ) {
+    throwAdapterError({
+      code: "adapter_invalid_json_response",
+      message: "서버 API 응답을 확인하지 못했습니다.",
+      status: response.status || undefined,
+    });
+  }
+  if (result.ok && !successfulStatus) {
+    throwAdapterError({
+      code: "adapter_http_error",
+      message: "서버 API 요청이 실패했습니다.",
+      status: response.status,
+    });
+  }
   if (!result.ok) throwAdapterError(result.error);
   return result.value;
 }
