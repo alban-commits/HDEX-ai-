@@ -457,8 +457,27 @@ describe("Higgsfield MCP discovery boundary", () => {
     soul.parameters = [
       {
         name: "quality",
-        options: ["2k", "secret-access-token", "https://signed.example/result"],
+        options: [
+          "2k",
+          "access_token",
+          "refresh_token",
+          "accessToken",
+          "authorization_header",
+          "cookieValue",
+          "secret_value",
+          "bearer-value",
+          "https://signed.example/result",
+          "ftp://files.example/model",
+          "file://private/model",
+          "s3://private-bucket/model",
+        ],
       },
+      { name: "access_token", options: ["allowed-looking-value"] },
+      { name: "refresh_token", options: ["allowed-looking-value"] },
+      { name: "accessToken", options: ["allowed-looking-value"] },
+      { name: "authorization_header", options: ["allowed-looking-value"] },
+      { name: "cookieValue", options: ["allowed-looking-value"] },
+      { name: "secret_value", options: ["allowed-looking-value"] },
     ];
     Object.assign(soul, {
       access_token: "secret-access-token",
@@ -469,15 +488,38 @@ describe("Higgsfield MCP discovery boundary", () => {
       prompt: "private prompt",
       raw_response: { forbidden: true },
     });
-    const fallbackModels = Array.from({ length: 7 }, (_, index) => ({
-      id: `runtime/soul-${index}`,
-      name: `Soul ${index}`,
-      job_set_type: `runtime_soul_${index}`,
-      provider_name: "Higgsfield",
-      output_type: "image",
-      access_token: "fallback-secret-token",
-      url: "https://signed.example/fallback",
-    }));
+    const fallbackModels = [
+      {
+        id: "access_token",
+        name: "refresh_token",
+        job_set_type: "accessToken",
+        provider_name: "authorization_header",
+        output_type: "cookieValue",
+      },
+      {
+        id: "secret_value",
+        name: "bearer-value",
+        job_set_type: "ftp://files.example/model",
+        provider_name: "Higgsfield",
+        output_type: "image",
+      },
+      {
+        id: "file://private/model",
+        name: "s3://private-bucket/model",
+        job_set_type: "runtime_soul_2",
+        provider_name: "Higgsfield",
+        output_type: "image",
+      },
+      ...Array.from({ length: 4 }, (_, index) => ({
+        id: `runtime/soul-${index + 3}`,
+        name: `Soul ${index + 3}`,
+        job_set_type: `runtime_soul_${index + 3}`,
+        provider_name: "Higgsfield",
+        output_type: "image",
+        access_token: "fallback-secret-token",
+        url: "https://signed.example/fallback",
+      })),
+    ];
     const result = await rejectedSoulDiagnostic({ soulContent: soul, fallbackModels });
     expect(result.lines).toHaveLength(1);
     expect(Object.keys(result.diagnostic).sort()).toEqual(
@@ -502,6 +544,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       jobSetType: { present: false },
     });
     expect(result.diagnostic.fallbackCandidates).toHaveLength(5);
+    expect(result.diagnostic.parameters).toEqual([{ name: "quality", enumValues: ["2k"] }]);
     const serializedDiagnostic = result.lines[0]!;
     expect(serializedDiagnostic).not.toContain("\n");
     for (const forbidden of [
@@ -513,6 +556,16 @@ describe("Higgsfield MCP discovery boundary", () => {
       "private-media-id",
       "private prompt",
       "raw_response",
+      "access_token",
+      "refresh_token",
+      "accessToken",
+      "authorization_header",
+      "cookieValue",
+      "secret_value",
+      "bearer-value",
+      "ftp://",
+      "file://",
+      "s3://",
     ]) {
       expect(serializedDiagnostic).not.toContain(forbidden);
     }

@@ -770,9 +770,8 @@ function safeDiagnosticText(value: unknown, max = 160): string | undefined {
   const text = safeText(value, max) ?? undefined;
   if (
     !text ||
-    /(?:https?|wss?):\/\/|(?:data|blob):|\b(?:authorization|bearer|cookie|secret|token)\b/iu.test(
-      text,
-    )
+    /(?:authorization|bearer|cookie|secret|token)/iu.test(text) ||
+    /[a-z][a-z0-9+.-]*:|\bwww\./iu.test(text)
   ) {
     return undefined;
   }
