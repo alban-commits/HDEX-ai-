@@ -3,11 +3,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
-import { createJobClient } from "@higgsfield/fnf/client";
+import { QueryClient, type InfiniteData } from "@tanstack/react-query";
+import { createJobClient, type Generation, type ListResult } from "@higgsfield/fnf/client";
 import { nanoBanana2 } from "@higgsfield/fnf/jobs";
+import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, claimHorizonImageReservation, horizonBatchProgress, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, scanHorizonFolder, selectHorizonImages } from "../src/lib/horizon";
+import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
+import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
+import { generationToGalleryItem } from "../src/lib/higgsfield-generation-results";
 import { disconnectHiggsfieldOAuth } from "../src/lib/fnf.browser";
 import { buildCodexPrompt, compilePrompt, HORIZON_PROMPT_VERSION, promptSchema, referenceGuard } from "../src/server/horizon-prompt.server";
 import { clearHiggsfieldRuntime, getHiggsfieldCapabilityRecord, inspectHiggsfieldCapabilities, inspectHiggsfieldProvider } from "../src/server/higgsfield-mcp.server";
@@ -26,6 +31,32 @@ function file(name: string, path: string): File {
   const value = new File(["x"], name, { type: "image/png" });
   Object.defineProperty(value, "webkitRelativePath", { value: path });
   return value;
+}
+
+function typedFile(name: string, path: string, type: string): File {
+  const value = new File(["x"], name, { type });
+  Object.defineProperty(value, "webkitRelativePath", { value: path });
+  return value;
+}
+
+function fileHandle(name: string, type = "image/png"): HorizonFileHandle {
+  return { kind: "file", name, getFile: async () => new File(["x"], name, { type }) };
+}
+
+function directoryHandle(
+  name: string,
+  entries: Array<HorizonDirectoryHandle | HorizonFileHandle>,
+  permission: "granted" | "denied" | "prompt" = "granted",
+): HorizonDirectoryHandle {
+  return {
+    kind: "directory",
+    name,
+    async *values() { for (const entry of entries) yield entry; },
+    getDirectoryHandle: async () => { throw Object.assign(new Error("missing"), { name: "NotFoundError" }); },
+    getFileHandle: async () => { throw Object.assign(new Error("missing"), { name: "NotFoundError" }); },
+    queryPermission: async () => permission,
+    requestPermission: async () => permission,
+  };
 }
 
 describe("Horizon selection and folder contracts", () => {
@@ -57,6 +88,43 @@ describe("Horizon selection and folder contracts", () => {
       { name:"root/look-a",ready:true,numbers:[1,3,7] },
       { name:"root/look-b",ready:false,numbers:[2] },
     ]);
+  });
+
+  test("reports empty numbering, missing model, unsupported format, and keeps valid JPG work runnable", () => {
+    const jobs = scanHorizonFolder([
+      file("look.png", "root/no-number/look.png"),
+      file("2.png", "root/no-model/2.png"),
+      file("1.jpg", "root/valid/1.jpg"),
+      typedFile("2.gif", "root/valid/2.gif", "image/gif"),
+    ]);
+    const withUnsupported = scanHorizonFolder([typedFile("1.gif", "root/unsupported/1.gif", "image/gif")]);
+    expect(jobs.find((job) => job.name === "root/no-number")?.error).toBe("no_recognized_images");
+    expect(jobs.find((job) => job.name === "root/no-model")?.error).toBe("model_reference_missing");
+    expect(jobs.find((job) => job.name === "root/valid")?.ready).toBe(true);
+    expect(withUnsupported.find((job) => job.name === "root/unsupported")?.error).toBe("unsupported_format");
+  });
+
+  test("scans directory handles recursively while excluding hidden and completed-output folders", async () => {
+    const valid = directoryHandle("상품-A", [fileHandle("1.jpg", "image/jpeg"), fileHandle("3.png")]);
+    const noModel = directoryHandle("상품-B", [fileHandle("2.webp", "image/webp")]);
+    const hidden = directoryHandle(".cache", [fileHandle("1.jpg", "image/jpeg")]);
+    const completed = directoryHandle("완성본", [fileHandle("1.jpg", "image/jpeg")]);
+    const nested = directoryHandle("카테고리", [valid, noModel, hidden, completed]);
+    const rootHandle = directoryHandle("작업루트", [nested]);
+    const jobs = await scanHorizonDirectory(rootHandle);
+    expect(jobs.map((job) => ({ name: job.name, ready: job.ready, error: job.error }))).toEqual([
+      { name: "카테고리/상품-A", ready: true, error: undefined },
+      { name: "카테고리/상품-B", ready: false, error: "model_reference_missing" },
+    ]);
+    expect(jobs.every((job) => !job.name.includes("작업루트"))).toBe(true);
+
+    const rootJob = await scanHorizonDirectory(directoryHandle("작업루트", [fileHandle("1.jpg", "image/jpeg")]));
+    expect(rootJob[0]?.name).toBe("루트 폴더");
+  });
+
+  test("fails closed instead of returning a partial scan above 5,000 files", async () => {
+    const entries = Array.from({ length: HORIZON_MAX_FOLDER_FILES + 1 }, (_, index) => fileHandle(`${index === 0 ? 1 : 2}-${index}.png`));
+    await expect(scanHorizonDirectory(directoryHandle("작업루트", entries))).rejects.toBeInstanceOf(HorizonDirectoryScanError);
   });
 
   test("keeps duplicate numbered roles unique and rejects a folder with 15 applicable images", () => {
@@ -104,7 +172,14 @@ describe("Horizon selection and folder contracts", () => {
     ] as never;
     const outcome = resolveHorizonBatchOutcome(generations, "gpt-2k", "Look / A", 4);
     expect(outcome).toMatchObject({ successCount: 1, failureCount: 3 });
-    expect(outcome.results).toEqual([{ url: "https://cdn.example/ready.png", filename: "Look-A-01-2k.png" }]);
+    expect(outcome.results).toEqual([{ url: "https://cdn.example/ready.png", filename: "Look - A_01.png" }]);
+    const single = resolveHorizonBatchOutcome(generations.slice(0, 1), "gpt-2k", "단일 상품", 1);
+    expect(single.results[0]?.filename).toBe("단일 상품.png");
+    const two = resolveHorizonBatchOutcome([
+      generations[0],
+      { ...generations[0], id: "ready-2", results: { rawUrl: "https://cdn.example/ready-2.webp" } },
+    ] as never, "gpt-2k", "복수 상품", 2);
+    expect(two.results.map((result) => result.filename)).toEqual(["복수 상품_01.png", "복수 상품_02.webp"]);
     expect(horizonBatchProgress([
       { ready: true, status: "completed" },
       { ready: true, status: "failed" },
@@ -126,6 +201,151 @@ describe("Horizon selection and folder contracts", () => {
     expect(visible("gpt-2k")).toEqual(["gpt-2k"]);
     expect(visible("nano-2k")).toEqual(["nano-2k"]);
     expect(visible("nano-4k")).toEqual(["nano-4k"]);
+  });
+});
+
+describe("Horizon browser directory boundary", () => {
+  test("binds the directory picker to its window and keeps a selected handle when remembering fails", async () => {
+    const handle = directoryHandle("작업루트", []);
+    const windowLike = {
+      marker: "window",
+      async showDirectoryPicker(this: { marker: string }, options: unknown) {
+        expect(this.marker).toBe("window");
+        expect(options).toEqual({ id: "hdex-horizon-batch", mode: "readwrite", startIn: "desktop" });
+        return handle;
+      },
+    };
+    const picker = horizonDirectoryPickerFor(windowLike)!;
+    const picked = await pickHorizonBatchDirectory({
+      picker,
+      store: { load: async () => null, save: async () => { throw new Error("idb_failed"); } },
+    });
+    expect(picked).toEqual({ handle, remembered: false });
+  });
+
+  test("checks restored permission without requesting and requests only on the explicit action", async () => {
+    let queried = 0;
+    let requested = 0;
+    const handle = {
+      ...directoryHandle("작업루트", [], "prompt"),
+      queryPermission: async () => { queried += 1; return "prompt" as const; },
+      requestPermission: async () => { requested += 1; return "granted" as const; },
+    };
+    const restored = await restoreHorizonBatchDirectory({ load: async () => handle, save: async () => undefined });
+    expect(restored).toEqual({ handle, permission: "prompt" });
+    expect({ queried, requested }).toEqual({ queried: 1, requested: 0 });
+    expect(await requestHorizonBatchDirectoryPermission(handle)).toBe("granted");
+    expect(requested).toBe(1);
+  });
+
+  test("writes original single/multiple names with collision-safe _2 and _3 suffixes through the app result route", async () => {
+    const existing = new Set(["상품-A.jpg", "상품-A_2.jpg", "상품-B_01.webp"]);
+    const written = new Map<string, Blob>();
+    const output = {
+      ...directoryHandle("완성본", []),
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        if (!options?.create) {
+          if (existing.has(name)) return fileHandle(name);
+          throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+        }
+        existing.add(name);
+        return {
+          ...fileHandle(name),
+          createWritable: async () => ({
+            write: async (blob: Blob) => { written.set(name, blob); },
+            close: async () => undefined,
+          }),
+        };
+      },
+    } satisfies HorizonDirectoryHandle;
+    const rootHandle = {
+      ...directoryHandle("작업루트", []),
+      getDirectoryHandle: async (name: string, options?: { create?: boolean }) => {
+        expect({ name, options }).toEqual({ name: "완성본", options: { create: true } });
+        return output;
+      },
+    } satisfies HorizonDirectoryHandle;
+    const requested: string[] = [];
+    const saved = await saveHorizonBatchResults({
+      root: rootHandle,
+      results: [
+        { url: "/api/higgsfield/result/job-safe-a", filename: "상품-A.png" },
+        { url: "/api/higgsfield/result/job-safe-b", filename: "상품-B_01.png" },
+      ],
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async (url) => {
+        requested.push(String(url));
+        const type = String(url).endsWith("-b") ? "image/webp" : "image/jpeg";
+        return new Response(new Blob(["image"], { type }), { status: 200, headers: { "content-type": type } });
+      },
+    });
+    expect(saved).toEqual({ savedFiles: ["상품-A_3.jpg", "상품-B_01_2.webp"], failureCount: 0 });
+    expect(requested).toEqual(["/api/higgsfield/result/job-safe-a", "/api/higgsfield/result/job-safe-b"]);
+    expect([...written.keys()]).toEqual(["상품-A_3.jpg", "상품-B_01_2.webp"]);
+  });
+
+  test("does not create an output file after permission or unknown lookup errors", async () => {
+    let createCalls = 0;
+    const output = {
+      ...directoryHandle("완성본", []),
+      getFileHandle: async (_name: string, options?: { create?: boolean }) => {
+        if (options?.create) createCalls += 1;
+        throw Object.assign(new Error("denied"), { name: "NotAllowedError" });
+      },
+    } satisfies HorizonDirectoryHandle;
+    const rootHandle = { ...directoryHandle("작업루트", []), getDirectoryHandle: async () => output } satisfies HorizonDirectoryHandle;
+    const result = await saveHorizonBatchResults({
+      root: rootHandle,
+      results: [{ url: "/api/higgsfield/result/job-safe", filename: "상품-A.png" }],
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async () => new Response(new Blob(["image"], { type: "image/png" }), { headers: { "content-type": "image/png" } }),
+    });
+    expect(result).toEqual({ savedFiles: [], failureCount: 1 });
+    expect(createCalls).toBe(0);
+  });
+
+  test("keeps generated result downloads recoverable when the completed folder cannot be created", async () => {
+    let fetchCalls = 0;
+    const rootHandle = {
+      ...directoryHandle("작업루트", []),
+      getDirectoryHandle: async () => { throw Object.assign(new Error("denied"), { name: "NotAllowedError" }); },
+    } satisfies HorizonDirectoryHandle;
+    const result = await saveHorizonBatchResults({
+      root: rootHandle,
+      results: [
+        { url: "/api/higgsfield/result/one", filename: "상품-A-01.png" },
+        { url: "/api/higgsfield/result/two", filename: "상품-A-02.png" },
+      ],
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async () => { fetchCalls += 1; return new Response(); },
+    });
+    expect(result).toEqual({ savedFiles: [], failureCount: 2 });
+    expect(fetchCalls).toBe(0);
+  });
+
+  test("preserves successful file names when another completed result cannot be saved", async () => {
+    const output = {
+      ...directoryHandle("완성본", []),
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        if (name.startsWith("상품-B")) throw Object.assign(new Error("denied"), { name: "NotAllowedError" });
+        if (!options?.create) throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+        return {
+          ...fileHandle(name),
+          createWritable: async () => ({ write: async () => undefined, close: async () => undefined }),
+        };
+      },
+    } satisfies HorizonDirectoryHandle;
+    const rootHandle = { ...directoryHandle("작업루트", []), getDirectoryHandle: async () => output } satisfies HorizonDirectoryHandle;
+    const result = await saveHorizonBatchResults({
+      root: rootHandle,
+      results: [
+        { url: "/api/higgsfield/result/one", filename: "상품-A-01.png" },
+        { url: "/api/higgsfield/result/two", filename: "상품-B-01.png" },
+      ],
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async () => new Response(new Blob(["image"], { type: "image/png" }), { headers: { "content-type": "image/png" } }),
+    });
+    expect(result).toEqual({ savedFiles: ["상품-A-01.png"], failureCount: 1 });
   });
 });
 
@@ -458,6 +678,125 @@ describe("Nano Banana Pro MCP boundary", () => {
   });
 });
 
+describe("Horizon current-session history", () => {
+  const generation = (id: string, model: "gpt_image_2" | "nano_banana_2", resolution: "2k" | "4k", status: Generation["status"]): Generation => ({
+    id,
+    model,
+    type: "image",
+    status,
+    input: { model, settings: { resolution } },
+    ...(status === "completed" ? { results: { rawUrl: `/api/higgsfield/result/${id}` } } : {}),
+  });
+
+  test("folds submit then completed into the current scoped history exactly once", async () => {
+    const queryClient = new QueryClient();
+    const scopeKey = "oauth-browser-a";
+    const otherScope = "oauth-browser-b";
+    const empty = { pages: [{ items: [] }], pageParams: [undefined] };
+    queryClient.setQueryData(fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey }), empty);
+    queryClient.setQueryData(fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey: otherScope }), {
+      pages: [{ items: [generation("other", "gpt_image_2", "2k", "completed")] }],
+      pageParams: [undefined],
+    });
+    await syncHorizonHistory(queryClient, [generation("new", "gpt_image_2", "2k", "queued")], scopeKey);
+    await syncHorizonHistory(queryClient, [generation("new", "gpt_image_2", "2k", "completed")], scopeKey);
+    await syncHorizonHistory(queryClient, [generation("new", "gpt_image_2", "2k", "completed")], scopeKey);
+    const current = queryClient.getQueryData<InfiniteData<ListResult>>(fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey }));
+    const other = queryClient.getQueryData<InfiniteData<ListResult>>(fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey: otherScope }));
+    expect(current?.pages[0]?.items).toHaveLength(1);
+    expect(current?.pages[0]?.items[0]).toMatchObject({ id: "new", status: "completed" });
+    const selected = flattenFeedPages(current!);
+    expect(selected).toHaveLength(1);
+    expect(generationToGalleryItem(selected[0]!)?.status).toBe("ready");
+    expect(other?.pages[0]?.items.map((item) => item.id)).toEqual(["other"]);
+  });
+
+  test("seeds an absent scoped feed with one completed gallery item", async () => {
+    const queryClient = new QueryClient();
+    const scopeKey = "oauth-browser-a";
+    await syncHorizonHistory(queryClient, [generation("new", "gpt_image_2", "2k", "completed")], scopeKey);
+    const current = queryClient.getQueryData<InfiniteData<ListResult>>(fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey }));
+    const selected = flattenFeedPages(current!);
+    expect(selected).toHaveLength(1);
+    expect(generationToGalleryItem(selected[0]!)?.status).toBe("ready");
+    expect(queryClient.getQueryData(fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey: "oauth-browser-b" }))).toBeUndefined();
+  });
+
+  test("reconciles an absent seed with old and new same-scope history after canceling a pending empty list", async () => {
+    const queryClient = new QueryClient();
+    const scopeKey = "oauth-browser-a";
+    let resolveList!: (value: ListResult) => void;
+    const list = new Promise<ListResult>((resolve) => { resolveList = resolve; });
+    let listCalls = 0;
+    const completed = generation("new", "gpt_image_2", "2k", "completed");
+    const old = generation("old", "gpt_image_2", "2k", "completed");
+    const otherKey = fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey: "oauth-browser-b" });
+    queryClient.setQueryData(otherKey, { pages: [{ items: [generation("other", "gpt_image_2", "2k", "completed")] }], pageParams: [undefined] });
+    const pending = queryClient.fetchInfiniteQuery(jobsFeedQueryOptions({
+      list: async () => {
+        listCalls += 1;
+        return listCalls === 1 ? list : { items: [old, completed] };
+      },
+    }, HORIZON_HISTORY_QUERY, { scopeKey }));
+    await Promise.resolve();
+    await syncHorizonHistory(queryClient, [completed], scopeKey);
+    resolveList({ items: [] });
+    await pending.catch(() => undefined);
+    const current = queryClient.getQueryData<InfiniteData<ListResult>>(fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey }));
+    expect(flattenFeedPages(current!).map((item) => ({ id: item.id, status: item.status }))).toEqual([
+      { id: "old", status: "completed" },
+      { id: "new", status: "completed" },
+    ]);
+    expect(listCalls).toBe(2);
+    expect(queryClient.getQueryData<InfiniteData<ListResult>>(otherKey)?.pages[0]?.items.map((item) => item.id)).toEqual(["other"]);
+  });
+
+  test("keeps the completed card and generation outcome when same-scope list reconciliation fails", async () => {
+    const queryClient = new QueryClient();
+    const scopeKey = "oauth-browser-a";
+    const scopedKey = fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey });
+    queryClient.getQueryCache().build(queryClient, {
+      queryKey: scopedKey,
+      queryFn: async () => { throw new Error("list_jobs_private_failure"); },
+    });
+    Object.defineProperty(queryClient, "invalidateQueries", {
+      configurable: true,
+      value: async () => { throw new Error("list_jobs_private_failure"); },
+    });
+    const completed = generation("new", "gpt_image_2", "2k", "completed");
+    await expect(syncHorizonHistory(queryClient, [completed], scopeKey)).resolves.toBeUndefined();
+    const current = queryClient.getQueryData<InfiniteData<ListResult>>(scopedKey);
+    expect(generationToGalleryItem(flattenFeedPages(current!)[0]!)?.status).toBe("ready");
+    expect(resolveHorizonBatchOutcome([completed], "gpt-2k", "상품-A", 1)).toMatchObject({
+      successCount: 1,
+      failureCount: 0,
+      results: [{ filename: "상품-A.png" }],
+    });
+  });
+
+  test("refetches completed listJobs data into only the matching scope and engine filter", async () => {
+    const queryClient = new QueryClient();
+    const calls: unknown[] = [];
+    const listed = [
+      generation("gpt", "gpt_image_2", "2k", "completed"),
+      generation("nano-2k", "nano_banana_2", "2k", "completed"),
+      generation("nano-4k", "nano_banana_2", "4k", "completed"),
+      generation("pending", "gpt_image_2", "2k", "in_progress"),
+      generation("failed", "gpt_image_2", "2k", "failed"),
+    ];
+    const options = jobsFeedQueryOptions({ list: async (query) => { calls.push(query); return { items: listed }; } }, HORIZON_HISTORY_QUERY, { scopeKey: "oauth-browser-a" });
+    const first = await queryClient.fetchInfiniteQuery(options);
+    await queryClient.refetchQueries({ queryKey: fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey: "oauth-browser-a" }), exact: true });
+    expect(calls).toHaveLength(2);
+    expect(first.pages[0]?.items.filter((item) => horizonGenerationMatchesEngine(item, "gpt-2k")).map((item) => item.id)).toEqual(["gpt", "pending", "failed"]);
+    expect(first.pages[0]?.items.filter((item) => horizonGenerationMatchesEngine(item, "nano-2k")).map((item) => item.id)).toEqual(["nano-2k"]);
+    expect(first.pages[0]?.items.filter((item) => horizonGenerationMatchesEngine(item, "nano-4k")).map((item) => item.id)).toEqual(["nano-4k"]);
+    expect(generationToGalleryItem(listed[3]!)?.status).toBe("generating");
+    expect(generationToGalleryItem(listed[4]!)?.status).toBe("failed");
+    expect(queryClient.getQueryData(fnfKeys.jobs(HORIZON_HISTORY_QUERY, { scopeKey: "oauth-browser-b" }))).toBeUndefined();
+  });
+});
+
 describe("same provider account browser-session isolation", () => {
   test("isolates uploads, jobs, capabilities, and disconnect cleanup by browser fingerprint", async () => {
     const common={schemaVersion:"hdex.higgsfield-oauth-session.v1" as const,accessToken:"same-account-token",refreshToken:"same-account-refresh",tokenEndpoint:"https://auth.higgsfield.ai/token",resource:"https://mcp.higgsfield.ai/mcp",accessExpiresAt:NOW+3600000,sessionExpiresAt:NOW+86400000};
@@ -473,6 +812,8 @@ describe("same provider account browser-session isolation", () => {
     expect(await hasGenerationMedia({sessionFingerprint:b,mediaIds:["upload-a"],env,now:NOW})).toBe(false);
     expect(await getGenerationJob({sessionFingerprint:a,jobId:"job-b",env,now:NOW})).toBeNull();
     expect(await getGenerationJob({sessionFingerprint:b,jobId:"job-b",env,now:NOW})).not.toBeNull();
+    expect((await listHiggsfieldGenerations({ fingerprint: a, size: 40, env, now: NOW })).items.map((item) => item.id)).toEqual(["job-a"]);
+    expect((await listHiggsfieldGenerations({ fingerprint: b, size: 40, env, now: NOW })).items.map((item) => item.id)).toEqual(["job-b"]);
     clearHiggsfieldRuntime(a);
     await clearGenerationRuntime(a,env);
     expect(await hasGenerationMedia({sessionFingerprint:a,mediaIds:["upload-a"],env,now:NOW})).toBe(false);

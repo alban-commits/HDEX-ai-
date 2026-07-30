@@ -35,11 +35,8 @@ export function horizonGenerationMatchesEngine(
 }
 
 function safeFolderName(value: string): string {
-  return value
-    .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}._-]+/gu, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 96) || "horizon-result";
+  const printable = [...value].map((character) => character.charCodeAt(0) < 32 ? "-" : character).join("");
+  return printable.replace(/[<>:"/\\|?*]/g, "-").trim().slice(0, 80) || "result";
 }
 
 function safeResultExtension(url: string): string {
@@ -53,10 +50,11 @@ function safeResultExtension(url: string): string {
 export function horizonBatchDownloadFilename(
   folderName: string,
   index: number,
-  resolution: "2k" | "4k",
+  quantity: number,
   url: string,
 ): string {
-  return `${safeFolderName(folderName)}-${String(index).padStart(2, "0")}-${resolution}.${safeResultExtension(url)}`;
+  const suffix = quantity > 1 ? `_${String(index).padStart(2, "0")}` : "";
+  return `${safeFolderName(folderName)}${suffix}.${safeResultExtension(url)}`;
 }
 
 export function resolveHorizonBatchOutcome(
@@ -65,7 +63,6 @@ export function resolveHorizonBatchOutcome(
   folderName: string,
   expectedCount: number,
 ): { results: HorizonBatchDownload[]; successCount: number; failureCount: number } {
-  const resolution = engine === "nano-4k" ? "4k" : "2k";
   const urls = generations.flatMap((generation) => {
     if (!horizonGenerationMatchesEngine(generation, engine)) return [];
     const media = selectGenerationMedia(generation);
@@ -74,7 +71,7 @@ export function resolveHorizonBatchOutcome(
   return {
     results: urls.map((url, index) => ({
       url,
-      filename: horizonBatchDownloadFilename(folderName, index + 1, resolution, url),
+      filename: horizonBatchDownloadFilename(folderName, index + 1, expectedCount, url),
     })),
     successCount: urls.length,
     failureCount: Math.max(expectedCount - urls.length, generations.length - urls.length, 0),
@@ -201,7 +198,7 @@ export type HorizonBatchJob = {
   key: string;
   name: string;
   ready: boolean;
-  error?: "model_reference_missing" | "too_many_images";
+  error?: "model_reference_missing" | "no_recognized_images" | "too_many_images" | "unsupported_format";
   files: HorizonBatchFile[];
 };
 
@@ -211,27 +208,34 @@ function relativeFilePath(file: File): string {
 }
 
 export function scanHorizonFolder(files: readonly File[]): HorizonBatchJob[] {
-  const groups = new Map<string, HorizonBatchFile[]>();
+  const groups = new Map<string, { files: HorizonBatchFile[]; supportedImage: boolean; unsupportedNumberedImage: boolean }>();
   for (const file of files.slice(0, HORIZON_MAX_FOLDER_FILES)) {
-    if (!/^image\/(?:jpeg|png|webp)$/i.test(file.type)) continue;
     const relativePath = relativeFilePath(file);
     const segments = relativePath.split("/").filter(Boolean);
     if (segments.length - 1 > HORIZON_MAX_FOLDER_DEPTH) continue;
+    const directories = segments.slice(0, -1);
+    if (directories.some((segment) => segment.startsWith(".") || segment === "완성본")) continue;
     const name = segments.at(-1) ?? file.name;
     const stem = name.replace(/\.[^.]+$/, "");
     const match = stem.match(/^([1-8])(?:$|[-_. ].*)/);
-    if (!match) continue;
-    const number = Number(match[1]);
-    const role = BATCH_ROLE[number];
-    if (!role) continue;
     const folder = segments.length > 1 ? segments.slice(0, -1).join("/") : ".";
-    const entries = groups.get(folder) ?? [];
-    entries.push({ file, relativePath, number, ...role });
-    groups.set(folder, entries);
+    const supportedImage = /\.(?:jpe?g|png|webp)$/i.test(name) || /^image\/(?:jpeg|png|webp)$/i.test(file.type);
+    const unsupportedImage = /\.(?:gif|bmp|tiff?|avif|heic|heif)$/i.test(name) || (/^image\//i.test(file.type) && !supportedImage);
+    if (!supportedImage && !(match && unsupportedImage)) continue;
+    const group = groups.get(folder) ?? { files: [], supportedImage: false, unsupportedNumberedImage: false };
+    group.supportedImage ||= supportedImage;
+    group.unsupportedNumberedImage ||= Boolean(match && unsupportedImage);
+    if (match && supportedImage) {
+      const number = Number(match[1]);
+      const role = BATCH_ROLE[number];
+      if (role) group.files.push({ file, relativePath, number, ...role });
+    }
+    groups.set(folder, group);
   }
   return [...groups.entries()]
     .sort(([left], [right]) => left.localeCompare(right, "ko", { numeric: true }))
-    .map(([key, entries]) => {
+    .map(([key, group]) => {
+      const entries = group.files;
       entries.sort((left, right) => left.number - right.number || left.relativePath.localeCompare(right.relativePath, "ko", { numeric: true }));
       const roleCounts = new Map<number, number>();
       const uniqueEntries = entries.map((entry) => {
@@ -243,13 +247,18 @@ export function scanHorizonFolder(files: readonly File[]): HorizonBatchJob[] {
       const hasModelReference = entries.some((entry) => entry.number === 1);
       const tooManyImages = entries.length > HORIZON_MAX_IMAGES;
       const ready = hasModelReference && !tooManyImages;
+      const error = tooManyImages
+        ? ("too_many_images" as const)
+        : entries.length === 0 && group.unsupportedNumberedImage
+          ? ("unsupported_format" as const)
+          : entries.length === 0
+            ? ("no_recognized_images" as const)
+            : ("model_reference_missing" as const);
       return {
         key,
         name: key === "." ? "선택한 폴더" : key,
         ready,
-        ...(ready
-          ? {}
-          : { error: tooManyImages ? ("too_many_images" as const) : ("model_reference_missing" as const) }),
+        ...(ready ? {} : { error }),
         files: uniqueEntries,
       };
     });

@@ -309,7 +309,7 @@
   cursor: pointer;
 }
 .hz-upload-add input,
-.hz-batch-picker input {
+.hz-batch-fallback-input {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -467,6 +467,7 @@
 .hz-prompt-actions,
 .hz-batch-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin-top: 11px;
@@ -647,16 +648,47 @@
   gap: 13px;
   padding: 17px;
 }
-.hz-batch-picker {
-  height: 50px;
-  padding: 0 14px;
+.hz-batch-instruction,
+.hz-batch-found,
+.hz-batch-empty {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.hz-batch-instruction {
+  color: var(--hz-text);
+}
+.hz-batch-found {
+  color: var(--hz-accent);
+  font-weight: 800;
+}
+.hz-batch-empty {
+  color: #ffb2b2;
+}
+.hz-batch-root {
+  min-height: 50px;
+  padding: 10px 14px;
   border: 1px solid var(--hz-line);
   border-radius: 12px;
   background: var(--hz-panel2);
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
   align-items: center;
+  gap: 3px 12px;
+}
+.hz-batch-root span,
+.hz-batch-root small {
+  color: var(--hz-muted);
+  font-size: 10px;
+}
+.hz-batch-root b {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--hz-text);
-  cursor: pointer;
+  font-size: 12px;
+}
+.hz-batch-root small {
+  grid-column: 1 / -1;
 }
 .hz-batch-note {
   margin: 0;
@@ -666,7 +698,7 @@
 }
 .hz-batch-summary {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
 }
 .hz-batch-summary > div {

@@ -113,6 +113,11 @@ describe("existing product UI regression boundary", () => {
       "후면 · 모델 후면 사용", "생성 모델 · 해상도", "생성 수량 (최대 4장)",
       "여러 장 선택", "한 번에 여러 장 또는 반복해서 계속 추가",
       "폴더에서 이 카드로 드래그앤드롭 가능",
+      "대량 생성 폴더 선택", "다시 스캔", "다른 폴더 선택", "폴더 권한 다시 승인",
+      "브라우저 방식으로 폴더 선택", "선택한 루트 폴더", "전체 작업 폴더",
+      "상품별 폴더에 1.jpg부터 번호를 붙여 넣고, 그 상위 폴더를 선택하세요.",
+      "생성할 상품 폴더가 없습니다. 각 상품 폴더에 1.jpg가 필요합니다.",
+      "Higgsfield 크레딧이 최대 ${expectedCount}회 사용될 수 있습니다. 일괄 생성을 시작할까요?",
       "촬영 방향을 선택하면 해당 방향의 모델 이미지만 기준으로 전송됩니다.",
       "AUTO JSON →", "아직 생성된 이미지가 없습니다.",
       "직원 공용",
@@ -123,7 +128,7 @@ describe("existing product UI regression boundary", () => {
     expect(component.indexOf("await disconnectHiggsfieldOAuth();")).toBeLessThan(
       component.indexOf("clearCurrentBrowserWorkspace();", component.indexOf("await disconnectHiggsfieldOAuth();")),
     );
-    expect(component).toContain("parentBusy || run.isRunning || batchRunning || batchActive.current");
+    expect(component).toContain("parentBusy || run.isRunning || batchRunning || batchScanning || batchActive.current");
     expect(component).toContain("promptBusy || promptFlight.current");
     expect(component).toContain("claimHorizonImageReservation(imagesRef.current.length, uploadReservations.current, files.length)");
     expect(component).toContain("uploadReservations.current = Math.max(0, uploadReservations.current - files.length)");
@@ -157,9 +162,30 @@ describe("existing product UI regression boundary", () => {
     expect(component).toContain("const downloadable = filteredRecentItems.filter");
     expect(component).toContain('label: "다운로드", icon: IconDownload');
     expect(component).toContain('openLabel={`원본 결과 보기: ${item.prompt}`}');
-    expect(component).toContain('event.currentTarget.value="";if(files)chooseFolder(files);');
+    expect(component).toContain('event.currentTarget.value="";if(files)chooseFallbackFolder(files);');
+    expect(component).toContain('setBatchDirectoryPermission("unsupported"); setBatchFallbackRequired(false);');
+    expect(component).toContain("if (files.length > HORIZON_MAX_FOLDER_FILES)");
+    expect(component).toContain('savedFiles: saved.savedFiles');
+    expect(component).toContain('saveFailureCount: saved.failureCount');
+    const chooseBatchDirectory = component.slice(
+      component.indexOf("const chooseBatchDirectory"),
+      component.indexOf("const rescanBatchDirectory"),
+    );
+    expect(chooseBatchDirectory).toContain('if (!supportsHorizonDirectoryPicker()) { fallbackFolderInput.current?.click(); return; }');
+    const pickerFailure = chooseBatchDirectory.slice(chooseBatchDirectory.indexOf("} catch (error) {"));
+    expect(pickerFailure).toContain("setBatchFallbackRequired(true);");
+    expect(pickerFailure).not.toContain("fallbackFolderInput.current?.click()");
+    const approveBatchDirectory = component.slice(
+      component.indexOf("const approveBatchDirectory"),
+      component.indexOf("const startBatch"),
+    );
+    expect(approveBatchDirectory).toContain("setBatchFallbackRequired(true);");
+    expect(approveBatchDirectory).not.toContain("fallbackFolderInput.current?.click()");
+    expect(component).toContain("syncHorizonHistory(queryClient, done, scopeKey);");
+    expect(component).not.toContain("const created = useRef(new Set<string>());");
     expect(component).not.toContain("void navigator.clipboard.writeText(command)");
     expect(component).not.toContain("No generations yet");
+    expect(component).not.toContain("Higgsfield 크레딧 사용 가능 횟수");
   });
 
   test("keeps the existing SignInModal DOM, copy, and styling unchanged", async () => {
