@@ -13,7 +13,7 @@ import {
   inspectHiggsfieldCapabilities,
 } from "./higgsfield-mcp.server";
 import { readFile } from "node:fs/promises";
-import { validateImageBytes } from "./image-validation.server";
+import { normalizeHiggsfieldUploadImage } from "./image-validation.server";
 import { withTemporaryFile } from "./temporary-storage.server";
 import {
   invalidateHiggsfieldAuthentication,
@@ -52,21 +52,26 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
     if (!(file instanceof File)) {
       throw new ApiJobError("invalid_file", "이미지를 선택해 주세요.", { status: 400 });
     }
-    if (file.type !== "image/jpeg" && file.type !== "image/png") {
-      throw new ApiJobError("invalid_file_type", "JPG와 PNG 이미지만 지원합니다.", {
+    if (file.type !== "image/jpeg" && file.type !== "image/png" && file.type !== "image/webp") {
+      throw new ApiJobError("invalid_file_type", "JPG, PNG, WebP 이미지만 지원합니다.", {
         status: 415,
       });
     }
     if (file.size === 0 || file.size > MAX_UPLOAD_BYTES) {
       throw new ApiJobError("file_too_large", "이미지는 20MB 이하여야 합니다.", { status: 413 });
     }
-    const contentType = file.type as "image/jpeg" | "image/png";
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    await validateImageBytes({
-      bytes,
-      contentType,
-      maxBytes: MAX_UPLOAD_BYTES,
-    });
+    const originalContentType = file.type as "image/jpeg" | "image/png" | "image/webp";
+    const originalBytes = new Uint8Array(await file.arrayBuffer());
+    let normalized: Awaited<ReturnType<typeof normalizeHiggsfieldUploadImage>>;
+    try {
+      normalized = await normalizeHiggsfieldUploadImage({
+        bytes: originalBytes,
+        contentType: originalContentType,
+        maxOriginalBytes: MAX_UPLOAD_BYTES,
+      });
+    } catch {
+      throw new ApiJobError("invalid_file", "이미지 파일을 확인해 주세요.", { status: 400 });
+    }
     if (!getHiggsfieldCapabilityRecord(fingerprint)) {
       await inspectHiggsfieldCapabilities({
         sessionFingerprint: fingerprint,
@@ -77,14 +82,14 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
     const ref = await withTemporaryFile({
       category: "uploads",
       sessionFingerprint: fingerprint,
-      extension: contentType === "image/png" ? "png" : "jpg",
-      bytes,
+      extension: normalized.extension,
+      bytes: normalized.bytes,
       operation: async (temporaryPath) =>
         uploadHiggsfieldImage({
           session: active.session,
           fingerprint,
-          filename: file.name.slice(0, 200) || "upload",
-          contentType,
+          filename: normalized.normalized ? "normalized-image.png" : (file.name.slice(0, 200) || `upload.${normalized.extension}`),
+          contentType: normalized.contentType,
           bytes: new Uint8Array(await readFile(temporaryPath)),
         }),
     });

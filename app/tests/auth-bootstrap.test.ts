@@ -78,6 +78,16 @@ test("sends only guests through the app auth route", () => {
   );
 });
 
+test("mints a fresh single-use confirmation token for every explicit submit", async () => {
+  if (!fnfBrowserAdapter.confirm) throw new Error("expected confirmation gate");
+  const request = { jobSetType: "text2image_soul_v2", params: { prompt: "same input" } };
+  const first = await fnfBrowserAdapter.confirm(request);
+  const second = await fnfBrowserAdapter.confirm(request);
+  expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(second).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(second).not.toBe(first);
+});
+
 test("normalizes uploaded image refs before they reach generation input", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
@@ -460,13 +470,13 @@ test("bounds and explicitly releases local upload object URLs", async () => {
     return appJson({ ok: true, ref: { id: `bounded-media-${id}`, type: "image" } });
   };
   try {
-    for (let index = 0; index < 9; index += 1) {
+    for (let index = 0; index < 33; index += 1) {
       await uploadAsset(new File([`image-${index}`], `upload-${index}.png`, { type: "image/png" }));
     }
     expect(getLocalUploadFile("bounded-media-1")).toBeUndefined();
     expect(revoked).toHaveLength(1);
-    releaseLocalUpload("bounded-media-9");
-    expect(getLocalUploadFile("bounded-media-9")).toBeUndefined();
+    releaseLocalUpload("bounded-media-33");
+    expect(getLocalUploadFile("bounded-media-33")).toBeUndefined();
     expect(revoked).toHaveLength(2);
   } finally {
     releaseAllLocalUploads();

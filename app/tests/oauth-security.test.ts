@@ -5,6 +5,7 @@ import {
   completeHiggsfieldOAuth,
   getHiggsfieldOAuthStatus,
   HIGGSFIELD_OAUTH_STATE_COOKIE,
+  higgsfieldOAuthSessionFingerprint,
   readHiggsfieldOAuthSession,
   validateHiggsfieldOAuthCallbackState,
   type HiggsfieldOAuthConfig,
@@ -229,6 +230,29 @@ describe("Higgsfield OAuth security contract", () => {
         NOW + 1_000,
       ),
     ).toBeNull();
+  });
+
+  test("isolates two browser sessions using the same provider account and disconnects only one", async () => {
+    const first = await connectedCookies();
+    const second = await connectedCookies();
+    const firstSession = readHiggsfieldOAuthSession(config, first.cookies, NOW + 1_000);
+    const secondSession = readHiggsfieldOAuthSession(config, second.cookies, NOW + 1_000);
+    if (!firstSession || !secondSession) throw new Error("expected connected sessions");
+    expect(firstSession.clientId).toBe(secondSession.clientId);
+    const firstFingerprint = higgsfieldOAuthSessionFingerprint(firstSession);
+    const secondFingerprint = higgsfieldOAuthSessionFingerprint(secondSession);
+    expect(firstFingerprint).not.toBe(secondFingerprint);
+    const cleared: string[] = [];
+    const response = await handleOAuthDisconnect(
+      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/disconnect`, {
+        method: "DELETE",
+        headers: { origin: PUBLIC_ORIGIN, cookie: cookieHeader(first.cookies) },
+      }),
+      { env, clearRuntime: (fingerprint) => { cleared.push(fingerprint); } },
+    );
+    expect(response.status).toBe(200);
+    expect(cleared).toEqual([firstFingerprint]);
+    expect(readHiggsfieldOAuthSession(config, second.cookies, NOW + 1_000)).not.toBeNull();
   });
 
   test("routes emit secure cookies, safe status JSON, reconnect state, and clear cookies", async () => {

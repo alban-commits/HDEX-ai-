@@ -6,6 +6,7 @@ import {
   flattenFeedPages,
   jobsFeedQueryOptions,
   prependGenerations,
+  removeGenerationQueries,
   useFnfJobClient,
   useFnfScopeKey,
   useGenerationRun,
@@ -33,6 +34,7 @@ import type { GalleryItem } from "@/components/gallery";
 import { generationToGalleryItem } from "@/lib/higgsfield-generation-results";
 import { getNextCursor } from "@/lib/cursor-pages";
 import {
+  disconnectHiggsfieldOAuth,
   GUEST_SCOPE_KEY,
   getReconnectSignInUrl,
   getSignInUrl,
@@ -45,6 +47,7 @@ import {
 import { composeInfluencerProfile } from "@/lib/profile.browser";
 import { savePreferences } from "@/lib/preferences.functions";
 import catalogJson from "@/data/reference-catalog.json";
+import { HorizonWorkspace } from "./horizon-workspace";
 
 type GenerationInput = SubmitInputFor<typeof PRESET_JOBS>;
 type Mode = "influencer" | "horizon";
@@ -155,7 +158,8 @@ function ProfilePreview({
 
 export function PresetTemplate() {
   const jobClient = useFnfJobClient<typeof PRESET_JOBS>();
-  const scopeKey = useFnfScopeKey() ?? GUEST_SCOPE_KEY;
+  const resolvedScopeKey = useFnfScopeKey();
+  const scopeKey = resolvedScopeKey ?? GUEST_SCOPE_KEY;
   const queryClient = useQueryClient();
   const run = useGenerationRun(jobClient, { scopeKey });
   const prepended = useRef(new Set<string>());
@@ -289,6 +293,39 @@ export function PresetTemplate() {
     return true;
   };
 
+  const clearInfluencerWorkspace = () => {
+    releaseAllLocalUploads();
+    setPose(null);
+    setUploads([]);
+    setProfile(null);
+    prepended.current.clear();
+    removeGenerationQueries(queryClient, { scopeKey });
+    run.reset();
+    setActiveTab("json");
+  };
+
+  const disconnectInfluencerAccount = async (reconnect: boolean) => {
+    if (run.isRunning || profileBusy) {
+      setMessage("처리 중에는 계정을 변경하거나 연결 해제할 수 없습니다.");
+      return;
+    }
+    try {
+      await disconnectHiggsfieldOAuth();
+      clearInfluencerWorkspace();
+      if (reconnect) {
+        setPendingSignInUrl(
+          getReconnectSignInUrl(
+            `${window.location.pathname}${window.location.search}${window.location.hash}`,
+          ),
+        );
+      } else {
+        window.location.reload();
+      }
+    } catch {
+      setMessage("Higgsfield 연결을 해제하지 못했습니다. 현재 작업은 그대로 유지됩니다.");
+    }
+  };
+
   const makeProfile = async () => {
     if (!pose || !requireSignIn()) return;
     setProfileBusy(true);
@@ -342,6 +379,10 @@ export function PresetTemplate() {
     selectedEnvironment?.scenes.find((item) => item.id === scene) ??
     selectedEnvironment?.scenes[0];
 
+  if (mode === "horizon") {
+    return <HorizonWorkspace parentBusy={run.isRunning || profileBusy} onParentWorkspaceReset={clearInfluencerWorkspace} onBack={() => setMode("influencer")} />;
+  }
+
   return (
     <div className="flex h-dvh gap-5 overflow-hidden bg-q-background-primary px-4 py-3">
       <SignInModal
@@ -375,6 +416,10 @@ export function PresetTemplate() {
             ["horizon", "호리존 제품 이미지"],
           ]}
           onChange={(value) => {
+            if (value === "horizon" && (run.isRunning || profileBusy)) {
+              setMessage("생성 또는 JSON 작성 중에는 호리존 화면으로 이동할 수 없습니다.");
+              return;
+            }
             setMode(value as Mode);
             setMessage("");
           }}
@@ -539,6 +584,26 @@ export function PresetTemplate() {
             >
               {run.isRunning ? "생성 요청 중" : "Higgsfield로 생성"}
             </Button>
+            <div className="flex min-h-6 items-center justify-center gap-1">
+              {resolvedScopeKey === undefined ? (
+                <Typography as="span" variant="caption-xs-regular" color="secondary">
+                  Higgsfield 연결 확인 중
+                </Typography>
+              ) : scopeKey === GUEST_SCOPE_KEY ? (
+                <Button variant="ghost" size="xs" onClick={() => requireSignIn()}>
+                  Higgsfield 계정 연결
+                </Button>
+              ) : (
+                <>
+                  <Button variant="ghost" size="xs" disabled={run.isRunning || profileBusy} onClick={() => void disconnectInfluencerAccount(true)}>
+                    계정 변경
+                  </Button>
+                  <Button variant="ghost" size="xs" disabled={run.isRunning || profileBusy} onClick={() => void disconnectInfluencerAccount(false)}>
+                    연결 해제
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </RailFooter>
       </aside>

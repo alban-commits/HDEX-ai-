@@ -16,6 +16,9 @@ describe("existing product UI regression boundary", () => {
       await readFile(new URL("../src/layouts/preset.tsx", import.meta.url), "utf8"),
     );
     const withoutAllowedConnectionHooks = source
+      .replace('import { HorizonWorkspace } from "./horizon-workspace";\n', "")
+      .replace("  removeGenerationQueries,\n", "")
+      .replace("  disconnectHiggsfieldOAuth,\n", "")
       .replace(
         /import \{\n {2}GUEST_SCOPE_KEY,[\s\S]*? {2}uploadAsset,\n\} from "@\/lib\/fnf\.browser";/,
         'import { GUEST_SCOPE_KEY, getSignInUrl, PRESET_JOBS, uploadAsset } from "@/lib/fnf.browser";',
@@ -30,10 +33,110 @@ describe("existing product UI regression boundary", () => {
       .replace("onSelect={selectPose}", "onSelect={setPose}")
       .replace(/\n {18}if \(pose\.ref\?\.id\) \{[\s\S]*?\n {18}\}/, "")
       .replace("@/lib/profile.browser", "@/lib/profile.functions")
-      .replace('poseMediaId: pose.ref?.id ?? ""', "poseImageUrl: pose.src");
+      .replace('poseMediaId: pose.ref?.id ?? ""', "poseImageUrl: pose.src")
+      .replace(
+        "  const resolvedScopeKey = useFnfScopeKey();\n  const scopeKey = resolvedScopeKey ?? GUEST_SCOPE_KEY;",
+        "  const scopeKey = useFnfScopeKey() ?? GUEST_SCOPE_KEY;",
+      )
+      .replace(
+        /\n {2}const clearInfluencerWorkspace = \(\) => \{[\s\S]*?\n {2}\};\n\n {2}const makeProfile/,
+        "\n  const makeProfile",
+      )
+      .replace(
+        /\n {12}if \(value === "horizon" && \(run\.isRunning \|\| profileBusy\)\) \{[\s\S]*?\n {12}\}/,
+        "",
+      )
+      .replace(
+        /\n {12}<div className="flex min-h-6 items-center justify-center gap-1">[\s\S]*?\n {12}<\/div>/,
+        "",
+      )
+      .replace(/\n {2}if \(mode === "horizon"\) \{\n {4}return <HorizonWorkspace[\s\S]*?\n {2}\}\n\n/, "\n");
     expect(sha256(withoutAllowedConnectionHooks)).toBe(
       "fc1b405dc6d1a9edb0dbb9bb0963af619a06a0fd718a3045a9751d6c696ea1e8",
     );
+  });
+
+  test("adds only the scoped Influencer Higgsfield account controls", async () => {
+    const component = normalizeLineEndings(
+      await readFile(new URL("../src/layouts/preset.tsx", import.meta.url), "utf8"),
+    );
+    for (const copy of ["Higgsfield 연결 확인 중", "Higgsfield 계정 연결", "계정 변경", "연결 해제"]) {
+      expect(component).toContain(copy);
+    }
+    expect(component).toContain("resolvedScopeKey === undefined");
+    expect(component).toContain('scopeKey === GUEST_SCOPE_KEY');
+    expect(component).toContain('disabled={run.isRunning || profileBusy}');
+    expect(component).toContain("if (run.isRunning || profileBusy)");
+
+    const cleanup = component.indexOf("const clearInfluencerWorkspace = () => {");
+    const release = component.indexOf("releaseAllLocalUploads();", cleanup);
+    const clearPose = component.indexOf("setPose(null);", cleanup);
+    const clearQueries = component.indexOf("removeGenerationQueries(queryClient, { scopeKey });", cleanup);
+    const disconnect = component.indexOf("await disconnectHiggsfieldOAuth();");
+    const clearCall = component.indexOf("clearInfluencerWorkspace();", disconnect);
+    const failureBoundary = component.indexOf("} catch {", disconnect);
+    const handlerEnd = component.indexOf("\n  };", failureBoundary);
+    expect(disconnect).toBeGreaterThan(-1);
+    expect(release).toBeGreaterThan(cleanup);
+    expect(clearPose).toBeGreaterThan(release);
+    expect(clearQueries).toBeGreaterThan(clearPose);
+    expect(clearCall).toBeGreaterThan(disconnect);
+    expect(clearCall).toBeLessThan(failureBoundary);
+    expect(component.slice(failureBoundary, handlerEnd)).not.toContain("releaseAllLocalUploads");
+    expect(component.slice(failureBoundary, handlerEnd)).not.toContain("setPose(null)");
+    expect(component.slice(failureBoundary, handlerEnd)).not.toContain("removeGenerationQueries");
+    expect(component).toContain("setUploads([]);");
+    expect(component).toContain("setProfile(null);");
+    expect(component).toContain("현재 작업은 그대로 유지됩니다.");
+    expect(component).not.toContain("disconnectHorizonOAuth");
+  });
+
+  test("contains the restored Horizon workspace sections without changing influencer copy", async () => {
+    const component = normalizeLineEndings(
+      await readFile(new URL("../src/layouts/horizon-workspace.tsx", import.meta.url), "utf8"),
+    );
+    const contract = normalizeLineEndings(
+      await readFile(new URL("../src/lib/horizon.ts", import.meta.url), "utf8"),
+    );
+    const source = `${component}\n${contract}`;
+    for (const copy of [
+      "패션 이미지 생성", "모델 참조", "모델 정면", "모델 측면/45도", "모델 후면",
+      "의상 참조", "전신 착장", "상의 디테일", "하의 디테일", "액세서리 참조",
+      "액세서리/착용법", "신발", "양말", "선택 옵션 · 비워도 됨",
+      "이미지로 자동 JSON 명령어 작성", "최종 생성 명령어", "폴더 일괄 자동 생성",
+      "GPT Image 2.0 · 2K", "Nano Banana Pro · 2K", "Nano Banana Pro · 4K",
+      "생성 결과 및 다운로드", "최근 생성 결과", "결과 불러오기", "전체 저장",
+      "자동 판별", "정면 · 모델 정면 사용", "측면/45도 · 모델 측면 사용",
+      "후면 · 모델 후면 사용", "생성 모델 · 해상도", "생성 수량 (최대 4장)",
+      "여러 장 선택", "한 번에 여러 장 또는 반복해서 계속 추가",
+      "폴더에서 이 카드로 드래그앤드롭 가능",
+      "촬영 방향을 선택하면 해당 방향의 모델 이미지만 기준으로 전송됩니다.",
+      "AUTO JSON →", "아직 생성된 이미지가 없습니다.",
+    ]) expect(source).toContain(copy);
+    expect(source).not.toContain("OPENAI_API_KEY 입력");
+    expect(source).not.toContain("계정 드롭다운");
+    expect(component).toContain("await disconnectHiggsfieldOAuth();");
+    expect(component.indexOf("await disconnectHiggsfieldOAuth();")).toBeLessThan(
+      component.indexOf("clearCurrentBrowserWorkspace();", component.indexOf("await disconnectHiggsfieldOAuth();")),
+    );
+    expect(component).toContain("parentBusy || run.isRunning || batchRunning || batchActive.current");
+    expect(component).toContain("promptBusy || promptFlight.current");
+    expect(component).toContain("claimHorizonImageReservation(imagesRef.current.length, uploadReservations.current, files.length)");
+    expect(component).toContain("uploadReservations.current = Math.max(0, uploadReservations.current - files.length)");
+    expect(component).toContain("onParentWorkspaceReset();");
+    expect(component).toContain('<button type="button" className="hz-ref-toggle"');
+    expect(component).toContain('aria-pressed={image.selected}');
+    expect(component).not.toContain('role="button"');
+    expect(component).toContain("finally {");
+    expect(component).toContain("setPromptBusy(false);");
+    expect(component).toContain("const batchSettings = { engine, ratio, quantity };");
+    expect(component).toContain("horizonGenerationMatchesEngine(generation, engine)");
+    expect(component).toContain("const downloadable = filteredRecentItems.filter");
+    expect(component).toContain('label: "다운로드", icon: IconDownload');
+    expect(component).toContain('openLabel={`원본 결과 보기: ${item.prompt}`}');
+    expect(component).toContain('event.currentTarget.value="";if(files)chooseFolder(files);');
+    expect(component).not.toContain("void navigator.clipboard.writeText(command)");
+    expect(component).not.toContain("No generations yet");
   });
 
   test("keeps the existing SignInModal DOM, copy, and styling unchanged", async () => {

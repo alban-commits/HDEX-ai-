@@ -61,6 +61,7 @@ type OAuthStatePayload = {
 
 export type HiggsfieldOAuthSession = {
   schemaVersion: "hdex.higgsfield-oauth-session.v1";
+  browserSessionId?: string;
   accessToken: string;
   refreshToken: string;
   clientId: string;
@@ -315,6 +316,8 @@ function validSession(value: unknown, now: number): value is HiggsfieldOAuthSess
   return (
     isRecord(value) &&
     value.schemaVersion === "hdex.higgsfield-oauth-session.v1" &&
+    (value.browserSessionId === undefined ||
+      (typeof value.browserSessionId === "string" && /^[A-Za-z0-9_-]{43}$/.test(value.browserSessionId))) &&
     typeof value.accessToken === "string" &&
     SAFE_TOKEN.test(value.accessToken) &&
     typeof value.refreshToken === "string" &&
@@ -488,6 +491,7 @@ function sealSession(
   const bundleId = randomBytes(32).toString("base64url");
   const metadata: OAuthSessionMetadata = {
     schemaVersion: session.schemaVersion,
+    browserSessionId: session.browserSessionId,
     tokenEndpoint: session.tokenEndpoint,
     resource: session.resource,
     accessExpiresAt: session.accessExpiresAt,
@@ -546,6 +550,7 @@ export async function completeHiggsfieldOAuth(input: {
     returnPath: stored.returnPath,
     sessionCookies: sealSession(input.config, {
       schemaVersion: "hdex.higgsfield-oauth-session.v1",
+      browserSessionId: randomBytes(32).toString("base64url"),
       accessToken: token.accessToken,
       refreshToken: token.refreshToken,
       clientId: stored.clientId,
@@ -629,12 +634,10 @@ export function readHiggsfieldOAuthSession(
 
 export function higgsfieldOAuthSessionFingerprint(session: HiggsfieldOAuthSession): string {
   return createHash("sha256")
-    .update("hdex.higgsfield-oauth-session-fingerprint.v1\0")
+    .update("hdex.higgsfield-oauth-session-fingerprint.v2\0")
     .update(session.resource)
     .update("\0")
-    .update(session.clientId)
-    .update("\0")
-    .update(String(session.sessionExpiresAt))
+    .update(session.browserSessionId ?? `${session.clientId}\0${session.sessionExpiresAt}`)
     .digest("base64url");
 }
 

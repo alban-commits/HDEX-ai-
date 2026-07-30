@@ -39,12 +39,12 @@ export async function uploadHiggsfieldImage(input: {
   env?: NodeJS.ProcessEnv;
   now?: number;
 }): Promise<{ id: string; type: "image" }> {
-  // 업로드 전에 두 UI 모델 중 하나라도 조회된 실행 profile이 있어야 한다.
-  try {
-    requireDiscoveredModel(input.fingerprint, "gpt_image_2");
-  } catch {
-    requireDiscoveredModel(input.fingerprint, "soul_2");
+  // 업로드 전에 현재 앱이 승인한 이미지 모델 중 하나라도 실행 가능해야 한다.
+  let ready = false;
+  for (const key of ["gpt_image_2", "soul_2", "nano_banana_pro"] as const) {
+    try { requireDiscoveredModel(input.fingerprint, key); ready = true; break; } catch {}
   }
+  if (!ready) requireDiscoveredModel(input.fingerprint, "gpt_image_2");
   const callTool =
     input.callTool ??
     ((name, args) => callHiggsfieldMcpTool({ session: input.session, name, args }));

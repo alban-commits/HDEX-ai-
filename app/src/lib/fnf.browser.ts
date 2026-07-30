@@ -1,11 +1,11 @@
 import type { FnfAdapter } from "@higgsfield/fnf";
 import type { MediaRef } from "@higgsfield/fnf/media";
 import { errorFromJSON } from "@higgsfield/fnf/errors";
-import { gptImage2, soulV2Image } from "@higgsfield/fnf/jobs";
+import { gptImage2, nanoBanana2, soulV2Image } from "@higgsfield/fnf/jobs";
 import type { AssetSelection } from "@/components/asset-library";
 import { fetchAppJson } from "./app-api-response.browser";
 
-export const PRESET_JOBS = [soulV2Image, gptImage2] as const;
+export const PRESET_JOBS = [soulV2Image, gptImage2, nanoBanana2] as const;
 
 type AdapterResponse =
   | { ok: true; value: unknown }
@@ -13,6 +13,11 @@ type AdapterResponse =
 
 type ReconnectListener = () => void;
 const reconnectListeners = new Set<ReconnectListener>();
+
+type HiggsfieldDisconnectResponse = {
+  connected: false;
+  transport: "mcp_oauth";
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -39,6 +44,18 @@ function isAdapterResponse(value: unknown, status: number): value is AdapterResp
     return status >= 200 && status < 300 && Object.hasOwn(value, "value");
   }
   return isApiError(value.error);
+}
+
+function isHiggsfieldDisconnectResponse(
+  value: unknown,
+  status: number,
+): value is HiggsfieldDisconnectResponse {
+  return (
+    status === 200 &&
+    isRecord(value) &&
+    value.connected === false &&
+    value.transport === "mcp_oauth"
+  );
 }
 
 function requiresReconnect(error: { code: string; data?: unknown }): boolean {
@@ -69,6 +86,14 @@ export function notifyHiggsfieldReconnectRequired(): void {
   for (const listener of reconnectListeners) listener();
 }
 
+export async function disconnectHiggsfieldOAuth(): Promise<void> {
+  await fetchAppJson<HiggsfieldDisconnectResponse>({
+    path: "/api/higgsfield/oauth/disconnect",
+    init: { method: "DELETE", credentials: "include" },
+    isEnvelope: isHiggsfieldDisconnectResponse,
+  });
+}
+
 async function adapterCall(operation: string, data: object = {}): Promise<unknown> {
   const result = await fetchAppJson<AdapterResponse>({
     path: "/api/higgsfield/adapter",
@@ -87,10 +112,9 @@ async function adapterCall(operation: string, data: object = {}): Promise<unknow
 
 /** Browser-safe adapter: every provider operation crosses the same-origin Node route. */
 export const fnfBrowserAdapter: FnfAdapter = {
-  // The existing Generate button is the explicit user action. This opaque ID
-  // lets the server atomically deduplicate that exact built request without
-  // adding a second confirmation UI.
-  confirm: () => Promise.resolve(crypto.randomUUID()),
+  // Each explicit Generate submit receives a fresh single-use intent token.
+  // The server coalesces only overlapping identical request hashes.
+  confirm: async () => crypto.randomUUID(),
   createJobs: (data) => adapterCall("createJobs", data),
   getJob: (id) => adapterCall("getJob", { id }),
   listJobs: (data) => adapterCall("listJobs", data),
@@ -154,7 +178,9 @@ function isUploadResponse(value: unknown, status: number): value is UploadRespon
   );
 }
 
-const MAX_LOCAL_UPLOADS = 8;
+// Fourteen interactive references plus one eight-file batch job can coexist;
+// keep a small bounded margin without evicting the active workspace.
+const MAX_LOCAL_UPLOADS = 32;
 const localUploadFiles = new Map<string, { file: File; objectUrl: string }>();
 
 export function getLocalUploadFile(mediaId: string): File | undefined {

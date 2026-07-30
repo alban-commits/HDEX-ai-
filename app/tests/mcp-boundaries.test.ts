@@ -97,7 +97,7 @@ const tools = [
                 medias: {
                   type: "array",
                   minItems: 0,
-                  maxItems: 4,
+                  maxItems: 14,
                   items: {
                     type: "object",
                     required: ["role", "value"],
@@ -113,7 +113,7 @@ const tools = [
                 medias: {
                   type: "array",
                   minItems: 0,
-                  maxItems: 4,
+                  maxItems: 14,
                   items: {
                     type: "object",
                     required: ["role", "value"],
@@ -135,7 +135,7 @@ const tools = [
 
 function detail(name: "Soul 2" | "GPT Image 2") {
   const soul = name === "Soul 2";
-  const aspects = ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"];
+  const aspects = ["9:16", "3:4", "2:3", ...(soul ? [] : ["3:2"]), "1:1", "4:3", "16:9"];
   return {
     id: soul ? "runtime/soul-model" : "runtime/gpt-image-model",
     name: soul ? "Higgsfield Soul V2" : name,
@@ -152,7 +152,7 @@ function detail(name: "Soul 2" | "GPT Image 2") {
           { name: "quality", options: ["high"] },
         ],
     aspect_ratios: aspects,
-    medias: [{ roles: ["reference"], max: soul ? 1 : 4 }],
+    medias: [{ roles: ["reference"], max: soul ? 1 : 14 }],
   };
 }
 
@@ -313,7 +313,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       available: true,
       modelId: "gpt_image_2",
       mediaRole: "provider_image_reference",
-      maximumImages: 4,
+      maximumImages: 14,
       resolutionValue: "2k",
       qualityValue: "high",
     });
@@ -1943,7 +1943,7 @@ describe("Higgsfield MCP discovery boundary", () => {
     }
   });
 
-  test("coalesces concurrent identical button attempts and polls only the known provider job", async () => {
+  test("coalesces concurrent identical submits but permits a later explicit identical submit", async () => {
     const fingerprint = "generation-dedup-session";
     await seed(fingerprint);
     let creates = 0;
@@ -1969,7 +1969,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       creates += 1;
       await new Promise((resolve) => setTimeout(resolve, 5));
       return {
-        results: [{ id: "provider-dedup-1", model: "soul_v2", status: "queued" }],
+        results: [{ id: `provider-dedup-${creates}`, model: "soul_v2", status: "queued" }],
       };
     };
     const common = {
@@ -1997,6 +1997,12 @@ describe("Higgsfield MCP discovery boundary", () => {
     });
     expect(firstReplay).toEqual(secondReplay);
     expect(creates).toBe(1);
+    const laterExplicitSubmit = await createHiggsfieldGeneration({
+      ...common,
+      confirmationToken: "request-dedup-0003",
+    });
+    expect(laterExplicitSubmit[0]?.id).toBe("provider-dedup-2");
+    expect(creates).toBe(2);
     const completed = await getHiggsfieldGeneration({
       fingerprint,
       session,

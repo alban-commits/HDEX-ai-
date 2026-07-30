@@ -1,0 +1,92 @@
+import { bindings } from "@/lib/bindings.server";
+import { imageDataUrl, postOpenAiJson } from "./openai-image-input.server";
+
+export const HORIZON_PROMPT_VERSION = "fashion-auto-numbering-angle-lock-v5-terra";
+export type HorizonPromptImage = { category: string; bytes: Uint8Array; contentType: "image/jpeg" | "image/png" | "image/webp" };
+
+export function promptInstructions(): string {
+  return `You are a deterministic multi-reference fashion image prompt compiler. Convert a rough Korean or English request and labeled images into one precise wardrobe/product-transfer specification for Higgsfield image generation.
+
+FIXED REFERENCE HIERARCHY:
+1. The matching MODEL image is the immutable base photograph. It alone controls identity, face, hair, skin, anatomy, body proportions, pose, view direction, crop, camera, background, lighting, shadows, subject scale, and placement.
+2. FULL LOOK controls overall outfit combination, silhouette, fit, proportion, layering, and styling only. Never transfer its person, body, pose, camera, or environment.
+3. TOP and BOTTOM detail references override FULL LOOK for product color, construction, fabric, seams, hems, pockets, hardware, graphics, and visible logo placement.
+4. SHOES, SOCKS, and ACCESSORY references control only their own wearable product. A wearing-style image may control placement and tying method, but never identity or environment.
+5. The user brief resolves only explicit conflicts. Never let vague wording weaken the immutable base lock.
+
+MISSING-REFERENCE RULE:
+- Replace only product roles that have a selected dedicated reference category.
+- If no SHOES reference is supplied, preserve the base model's original shoes exactly. If no SOCKS reference is supplied, preserve the base model's original socks or bare ankles exactly. If no ACCESSORY reference is supplied, preserve the base model's original accessory state and add nothing.
+- FULL LOOK authorizes transfer of upper and lower garments only. Shoes, socks, hats, bags, jewelry, eyewear, and other accessories visible inside a FULL LOOK image are context only and must not be transferred without their own selected category.
+- If only TOP is supplied, replace only the top and preserve the base bottom, shoes, socks, and accessories. If only BOTTOM is supplied, replace only the bottom and preserve every other base item.
+- An empty reference role means preserve that region from the immutable base, never remove it, restyle it, or invent a substitute.
+
+ANGLE RULES:
+- Front means a straight front-facing base; Side / 3-4 means the exact side or three-quarter angle visible in its base; Back means the exact rear-facing base.
+- Preserve the chosen base angle exactly. Adapt every garment and wearable to that angle with correct occlusion and only expose details physically visible from it.
+- Never rotate the model to show a product detail and never mix front, side, and rear poses.
+
+CONSISTENCY RULES:
+- Refer to inputs only as Image 1, Image 2, etc., matching the supplied order.
+- The user may provide only codes such as M1 W2 W3 A1. In that case, treat the codes as a complete selection instruction and infer the transfer action from each code's supplied category label. No prose request is required.
+- When the user brief is AUTO MODE, derive the entire task from the category labels: preserve the selected MODEL base and transfer only the supplied FULL LOOK, TOP, BOTTOM, SHOES, SOCKS, and ACCESSORY roles according to the fixed hierarchy.
+- If multiple images share a role, treat compatible images as complementary views of the same product. Do not average or hybridize conflicting products; use the clearest image consistent with the brief and state that choice.
+- Describe only clearly visible traits. Do not invent or repair unreadable text or logos. Preserve exact visible scale and placement instead of guessing spelling.
+- Specify realistic fit transfer wherever relevant: neckline, shoulder line, sleeve and hem length, waistband, rise, leg width, drape, folds, contact points, tension, occlusion, and shadows.
+- Output one subject, full product fidelity, natural hands and feet, bilateral shoe and sock consistency, and no composite or cutout appearance.
+- Return only the supplied JSON schema. Use concise professional English, empty strings for absent optional items, and no alternatives or commentary.`;
+}
+
+export function buildCodexPrompt(brief: string, ratio: string, targetView: string, images: readonly { category: string }[]): string {
+  return `${promptInstructions()}
+
+This is a bounded extraction task. Do not call tools, run commands, browse, or inspect files other than the attached images. Do not modify any file.
+The attached images correspond, in exact order, to these categories:
+${images.map((item, index) => `${index + 1}. ${item.category}`).join("\n")}
+
+USER BRIEF: ${brief}
+TARGET VIEW: ${targetView === "auto" ? "Infer from the selected model reference and user brief; if ambiguous, use Image 1 exactly." : targetView}
+OUTPUT RATIO: ${ratio}
+
+Return only the JSON object required by the supplied output schema.`;
+}
+
+export function promptSchema() {
+  const string = { type: "string" } as const;
+  return { type: "object", additionalProperties: false, properties: { task: string, target_view: string, primary_base: string, reference_roles: { type: "array", items: string }, identity_anatomy_lock: string, pose_camera_lock: string, environment_lock: string, full_look_transfer: string, top_transfer: string, bottom_transfer: string, footwear_transfer: string, socks_transfer: string, accessories_transfer: string, fit_material_realism: string, preserve: { type: "array", items: string }, exclude: { type: "array", items: string } }, required: ["task","target_view","primary_base","reference_roles","identity_anatomy_lock","pose_camera_lock","environment_lock","full_look_transfer","top_transfer","bottom_transfer","footwear_transfer","socks_transfer","accessories_transfer","fit_material_realism","preserve","exclude"] } as const;
+}
+
+export function referenceGuard(images: readonly { category: string }[]) {
+  const has = (label: string) => images.some((item) => item.category.includes(label));
+  const fullLook = has("전신 착장"); const top = fullLook || has("상의 디테일"); const bottom = fullLook || has("하의 디테일"); const shoes = has("신발"); const socks = has("양말"); const accessories = has("액세서리/착용법");
+  const authorized: string[] = []; const preserve: string[] = [];
+  if (top) authorized.push("upper garment only"); else preserve.push("original base upper garment");
+  if (bottom) authorized.push("lower garment only"); else preserve.push("original base lower garment");
+  if (shoes) authorized.push("shoes only"); else preserve.push("original base shoes exactly");
+  if (socks) authorized.push("socks only"); else preserve.push("original base socks or bare-ankle state exactly");
+  if (accessories) authorized.push("explicitly referenced accessories only"); else preserve.push("original base accessory state; add no hat, bag, jewelry, eyewear, or other accessory");
+  return { fullLook, top, bottom, shoes, socks, accessories, authorized: `${authorized.join("; ") || "no wardrobe or wearable replacement"}. Do not transfer any other visible item from reference images.`, preserve: `${preserve.join("; ")}. Missing reference categories are immutable and may not be restyled, removed, or invented.` };
+}
+
+export function compilePrompt(s: Record<string, unknown>, ratio: string, images: readonly { category: string }[]): string {
+  const guard = referenceGuard(images); const arrayText = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").join("; ") : "";
+  const parts: Array<[string, unknown]> = [["TASK",s.task],["TARGET VIEW",s.target_view],["PRIMARY IMMUTABLE BASE",s.primary_base],["REFERENCE ROLE MAP",arrayText(s.reference_roles)],["IDENTITY & ANATOMY LOCK",s.identity_anatomy_lock],["POSE, CAMERA & FRAMING LOCK",s.pose_camera_lock],["BACKGROUND, LIGHTING & SHADOW LOCK",s.environment_lock],["FULL-LOOK SILHOUETTE & STYLING",guard.fullLook?s.full_look_transfer:""],["TOP PRODUCT TRANSFER",guard.top?s.top_transfer:""],["BOTTOM PRODUCT TRANSFER",guard.bottom?s.bottom_transfer:""],["FOOTWEAR TRANSFER",guard.shoes?s.footwear_transfer:""],["SOCKS TRANSFER",guard.socks?s.socks_transfer:""],["ACCESSORY TRANSFER",guard.accessories?s.accessories_transfer:""],["AUTHORIZED REPLACEMENTS",guard.authorized],["UNREFERENCED ITEMS — PRESERVE FROM BASE",guard.preserve],["PHYSICAL FIT & MATERIAL REALISM",s.fit_material_realism],["PRESERVE EXACTLY",arrayText(s.preserve)],["DO NOT ADD, CHANGE, OR IMPORT",arrayText(s.exclude)],["FINAL OUTPUT",`One centered subject only. ${ratio} aspect ratio. Photorealistic high-end studio fashion photograph. The result must look like the primary base photograph itself with only the explicitly referenced wardrobe and wearable products replaced. Preserve exact view-dependent visibility, physically accurate anatomy, garment construction, fabric drape, contact points, occlusion, perspective, floor contact, and cast shadows. No artificial composite or cutout look.`]];
+  return parts.filter(([,value])=>String(value??"").trim()).map(([key,value])=>`${key}: ${String(value).trim()}`).join("\n");
+}
+
+function extractOutputText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const direct = (payload as { output_text?: unknown }).output_text; if (typeof direct === "string") return direct;
+  const output = (payload as { output?: unknown }).output; if (!Array.isArray(output)) return "";
+  for (const item of output) { if (!item || typeof item !== "object" || !Array.isArray((item as {content?:unknown}).content)) continue; for (const part of (item as {content:unknown[]}).content) if (part && typeof part === "object" && typeof (part as {text?:unknown}).text === "string") return (part as {text:string}).text; }
+  return "";
+}
+
+export async function composeHorizonPrompt(input: { brief: string; ratio: string; targetView: string; images: HorizonPromptImage[]; fetchImpl?: typeof fetch; apiKey?: string }) {
+  const apiKey = input.apiKey ?? bindings().OPENAI_API_KEY;
+  if (!apiKey) return { ok: false as const, code: "missing_openai_api_key", message: "회사 OpenAI 서버 설정을 확인해 주세요." };
+  const brief = input.brief.trim() || "AUTO MODE: infer the intended wardrobe and wearable transfer exclusively from the selected labeled reference categories. Replace every supplied dedicated product role and preserve every missing role from the immutable model base.";
+  const response = await postOpenAiJson({ apiKey, fetchImpl: input.fetchImpl, body: { model: "gpt-5.6-terra", input: [{ role: "user", content: [{ type: "input_text", text: buildCodexPrompt(brief,input.ratio,input.targetView,input.images) }, ...input.images.map((image)=>({ type:"input_image" as const, image_url:imageDataUrl(image.bytes,image.contentType), detail:"high" as const }))] }], text: { format: { type: "json_schema", name: "horizon_fashion_prompt", strict: true, schema: promptSchema() } } } });
+  if (!response.ok) return { ok: false as const, code: "openai_error", message: "GPT 명령어 작성 요청에 실패했습니다." };
+  try { const spec = JSON.parse(extractOutputText(response.payload)) as Record<string,unknown>; return { ok:true as const, prompt:compilePrompt(spec,input.ratio,input.images), spec, model:"gpt-5.6-terra", promptVersion:HORIZON_PROMPT_VERSION }; } catch { return { ok:false as const, code:"invalid_profile", message:"GPT가 올바른 JSON을 반환하지 않았습니다." }; }
+}

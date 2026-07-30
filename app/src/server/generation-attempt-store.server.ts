@@ -8,7 +8,7 @@ export type StoredGenerationJob = {
   id: string;
   providerJobId: string;
   providerModelId: string;
-  jobSetType: "text2image_soul_v2" | "gpt_image_2";
+  jobSetType: "text2image_soul_v2" | "gpt_image_2" | "nano_banana_2";
   status: "queued" | "in_progress" | "completed" | "failed" | "canceled";
   createdAt: number;
   expiresAt: number;
@@ -185,7 +185,7 @@ function parseJob(value: unknown): StoredGenerationJob {
     value.providerJobId !== value.id ||
     typeof value.providerModelId !== "string" ||
     !SAFE_ID.test(value.providerModelId) ||
-    (jobSetType !== "text2image_soul_v2" && jobSetType !== "gpt_image_2") ||
+    (jobSetType !== "text2image_soul_v2" && jobSetType !== "gpt_image_2" && jobSetType !== "nano_banana_2") ||
     (status !== "queued" &&
       status !== "in_progress" &&
       status !== "completed" &&

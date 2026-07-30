@@ -29,7 +29,7 @@ import { getTemporaryStorageConfig, isGenerationEnabled } from "./runtime-config
 
 type FnfJob = {
   id: string;
-  job_set_type: "text2image_soul_v2" | "gpt_image_2";
+  job_set_type: "text2image_soul_v2" | "gpt_image_2" | "nano_banana_2";
   status: "queued" | "in_progress" | "completed" | "failed" | "canceled";
   result_url?: string;
   params?: Record<string, unknown>;
@@ -187,9 +187,20 @@ function clientJob(job: StoredGenerationJob): FnfJob {
 }
 
 function extractMediaIds(params: Record<string, unknown>): string[] {
-  if (!Array.isArray(params.medias)) return [];
-  const ids = params.medias.flatMap((item) => {
+  if (params.medias !== undefined && params.input_images !== undefined) {
+    throw new ApiJobError("invalid_media", "업로드한 이미지 참조 형식이 올바르지 않습니다.", { status: 400 });
+  }
+  const source = params.input_images ?? params.medias;
+  if (source === undefined) return [];
+  if (!Array.isArray(source)) {
+    throw new ApiJobError("invalid_media", "업로드한 이미지 참조 형식이 올바르지 않습니다.", { status: 400 });
+  }
+  const ids = source.flatMap((item) => {
     if (!isRecord(item)) return [];
+    if (params.input_images !== undefined) {
+      const id = safeId(item.id);
+      return id && item.type === "media_input" ? [id] : [];
+    }
     if ("data" in item || item.role === "image") {
       if (item.role !== "image" || !isRecord(item.data) || item.data.type !== "media_input") {
         return [];
@@ -206,7 +217,7 @@ function extractMediaIds(params: Record<string, unknown>): string[] {
     }
     return [];
   });
-  if (ids.length !== params.medias.length || new Set(ids).size !== ids.length) {
+  if (ids.length !== source.length || new Set(ids).size !== ids.length) {
     throw new ApiJobError("invalid_media", "업로드한 이미지 참조를 확인할 수 없습니다.", {
       status: 400,
     });
@@ -239,7 +250,7 @@ function executionParams(input: {
   profile: DiscoveredModelProfile & { available: true; modelId: string };
   params: Record<string, unknown>;
 } {
-  const modelKey = input.jobSetType === "text2image_soul_v2" ? "soul_2" : "gpt_image_2";
+  const modelKey = input.jobSetType === "text2image_soul_v2" ? "soul_2" : input.jobSetType === "nano_banana_2" ? "nano_banana_pro" : "gpt_image_2";
   const profile = requireDiscoveredModel(input.fingerprint, modelKey);
   const prompt = typeof input.params.prompt === "string" ? input.params.prompt.trim() : "";
   const count = Number(input.params.batch_size ?? 1);
@@ -268,15 +279,20 @@ function executionParams(input: {
     [profile.aspectRatioParameter]: aspectValue,
   };
 
+  const requestedResolution = typeof input.params.resolution === "string" ? input.params.resolution.toLowerCase() : "";
   const uiResolutionValid =
     input.jobSetType === "text2image_soul_v2"
       ? input.params.quality === "1080p"
-      : typeof input.params.resolution === "string" &&
-        input.params.resolution.toLowerCase() === "2k";
+      : input.jobSetType === "nano_banana_2"
+        ? requestedResolution === "2k" || requestedResolution === "4k"
+        : requestedResolution === "2k";
+  const providerResolution = input.jobSetType === "nano_banana_2"
+    ? profile.resolutionValues?.[requestedResolution]
+    : profile.resolutionValue;
   if (
     !uiResolutionValid ||
     !profile.resolutionParameter ||
-    profile.resolutionValue === undefined ||
+    providerResolution === undefined ||
     profile.resolutionParameter === profile.aspectRatioParameter
   ) {
     throw new ApiJobError(
@@ -285,7 +301,7 @@ function executionParams(input: {
       { status: 409 },
     );
   }
-  providerParams[profile.resolutionParameter] = profile.resolutionValue;
+  providerParams[profile.resolutionParameter] = providerResolution;
 
   if (input.jobSetType === "gpt_image_2") {
     const requestedQuality = typeof input.params.quality === "string" ? input.params.quality : "";
@@ -335,8 +351,10 @@ function storedWireParams(
     aspect_ratio: aspectRatio,
     batch_size: batchSize,
     ...(quality ? { quality } : {}),
-    ...(jobSetType === "gpt_image_2" && resolution ? { resolution } : {}),
-    medias: mediaIds.map((id) => ({ id, type: "media_input" })),
+    ...((jobSetType === "gpt_image_2" || jobSetType === "nano_banana_2") && resolution ? { resolution } : {}),
+    ...(jobSetType === "nano_banana_2"
+      ? { input_images: mediaIds.map((id) => ({ id, type: "media_input" })) }
+      : { medias: mediaIds.map((id) => ({ id, type: "media_input" })) }),
   };
 }
 
@@ -422,9 +440,8 @@ async function parseAndPersistCreatedJobs(
         resultLineage = "omitted";
       }
     } else if (
-      persistence.jobSetType === "gpt_image_2" &&
-      expectedModelId === "gpt_image_2" &&
-      explicitModel === "gpt_image_2"
+      (persistence.jobSetType === "gpt_image_2" || persistence.jobSetType === "nano_banana_2") &&
+      explicitModel === expectedModelId
     ) {
       resultLineage = "provider_model";
     }
@@ -582,7 +599,7 @@ export async function createHiggsfieldGeneration(input: {
   now?: number;
   onGenerationDiagnostic?: (diagnostic: HiggsfieldGenerationDiagnostic) => void;
 }): Promise<FnfJob[]> {
-  if (input.jobSetType !== "text2image_soul_v2" && input.jobSetType !== "gpt_image_2") {
+  if (input.jobSetType !== "text2image_soul_v2" && input.jobSetType !== "gpt_image_2" && input.jobSetType !== "nano_banana_2") {
     throw new ApiJobError("unknown_model", "지원되지 않는 생성 모델입니다.", { status: 400 });
   }
   const jobSetType = input.jobSetType;

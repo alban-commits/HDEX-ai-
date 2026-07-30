@@ -35,10 +35,25 @@ const MODEL_TARGETS = [
     displayName: "GPT Image 2",
     providerName: "OpenAI",
     aliases: ["GPT Image 2", "OpenAI GPT Image 2", "GPT Image 2 OpenAI"],
-    aspects: ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"],
+    aspects: ["9:16", "3:4", "2:3", "3:2", "1:1", "4:3", "16:9"],
     resolution: "2k",
     qualities: ["high"],
-    maximumImages: 4,
+    maximumImages: 14,
+  },
+  {
+    key: "nano_banana_pro",
+    canonicalJobSetType: "nano_banana_2",
+    providerModelId: "nano_banana_pro",
+    searchName: "Nano Banana Pro",
+    displayName: "Nano Banana Pro",
+    providerName: "Google",
+    providerNames: ["Google", "Higgsfield"],
+    aliases: ["Nano Banana Pro", "Google Nano Banana Pro", "Nano Banana Pro Google"],
+    aspects: ["2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "1:1"],
+    resolution: "2k",
+    resolutions: ["2k", "4k"],
+    qualities: [],
+    maximumImages: 14,
   },
 ] as const;
 const REQUIRED_TOOLS = [
@@ -87,6 +102,7 @@ export type DiscoveredModelProfile = {
   aspectRatioParameter?: string;
   resolutionParameter?: string;
   resolutionValue?: string | number | boolean;
+  resolutionValues?: Record<string, string | number | boolean>;
   qualityParameter?: string;
   qualityValue?: string | number | boolean;
   mediaRole?: string;
@@ -188,7 +204,8 @@ function modelProviderMatches(
   target: (typeof MODEL_TARGETS)[number],
   providerName: string,
 ): boolean {
-  return normalizeName(providerName) === normalizeName(target.providerName);
+  const allowed = "providerNames" in target ? target.providerNames : [target.providerName];
+  return allowed.some((value) => normalizeName(providerName) === normalizeName(value));
 }
 
 function stableJson(value: unknown): string {
@@ -774,6 +791,7 @@ function productInputMappings(input: {
   aspectRatioParameter: string;
   resolutionParameter: string;
   resolutionValue: string | number | boolean;
+  resolutionValues: Record<string, string | number | boolean>;
   qualityParameter?: string;
   qualityValue?: string | number | boolean;
   maximumImages: number;
@@ -784,7 +802,8 @@ function productInputMappings(input: {
   const aspectOwners = optionOwners(input.parameters, input.target.aspects);
   const aspectRatioParameter =
     aspectOwners?.size === 1 ? [...aspectOwners][0]! : toolAspectParameter(input.generateTool);
-  const resolutionOwners = optionOwners(input.parameters, [input.target.resolution]);
+  const requiredResolutions = "resolutions" in input.target ? input.target.resolutions : [input.target.resolution];
+  const resolutionOwners = optionOwners(input.parameters, requiredResolutions);
   const qualityOwners =
     input.target.qualities.length > 0
       ? optionOwners(input.parameters, input.target.qualities)
@@ -809,12 +828,20 @@ function productInputMappings(input: {
   const resolutionValue = input.parameters[resolutionParameter]?.find(
     (value) => String(value).toLowerCase() === input.target.resolution.toLowerCase(),
   );
+  const resolutionValues = Object.fromEntries(
+    requiredResolutions.flatMap((resolution) => {
+      const value = input.parameters[resolutionParameter]?.find(
+        (option) => String(option).toLowerCase() === resolution.toLowerCase(),
+      );
+      return value === undefined ? [] : [[resolution, value]];
+    }),
+  );
   const qualityValue = qualityParameter
     ? input.parameters[qualityParameter]?.find(
         (value) => String(value).toLowerCase() === input.target.qualities[0]?.toLowerCase(),
       )
     : undefined;
-  if (resolutionValue === undefined || (qualityParameter && qualityValue === undefined))
+  if (resolutionValue === undefined || Object.keys(resolutionValues).length !== requiredResolutions.length || (qualityParameter && qualityValue === undefined))
     return null;
   const schemaMedia = toolMediaContract(input.generateTool, input.media.role);
   const maximumImages = Math.min(
@@ -827,6 +854,7 @@ function productInputMappings(input: {
     aspectRatioParameter,
     resolutionParameter,
     resolutionValue,
+    resolutionValues,
     ...(qualityParameter && qualityValue !== undefined ? { qualityParameter, qualityValue } : {}),
     maximumImages,
   };
@@ -913,6 +941,7 @@ function buildModelProfile(input: {
     aspectRatioParameter: mappings.aspectRatioParameter,
     resolutionParameter: mappings.resolutionParameter,
     resolutionValue: mappings.resolutionValue,
+    resolutionValues: mappings.resolutionValues,
     ...(mappings.qualityParameter ? { qualityParameter: mappings.qualityParameter } : {}),
     ...(mappings.qualityValue !== undefined ? { qualityValue: mappings.qualityValue } : {}),
     mediaRole: media.role,
@@ -925,6 +954,7 @@ export async function inspectHiggsfieldProvider(input: {
   listTools: (cursor?: string) => Promise<{ tools: unknown[]; nextCursor?: string }>;
   callTool: (name: "models_explore", args: Record<string, unknown>) => Promise<unknown>;
   now?: number;
+  includeNano?: boolean;
 }): Promise<HiggsfieldCapabilityRecord> {
   const tools: DiscoveredTool[] = [];
   const cursors = new Set<string>();
@@ -986,7 +1016,7 @@ export async function inspectHiggsfieldProvider(input: {
     }
     return listedModels;
   };
-  for (const target of MODEL_TARGETS) {
+  for (const target of MODEL_TARGETS.filter((item) => input.includeNano === true || item.key !== "nano_banana_pro")) {
     const canonicalCandidate: SearchModel = {
       id: target.providerModelId,
       name: target.searchName,
@@ -1078,6 +1108,7 @@ async function runOfficialInspection(input: {
     operation: async (client, signal) =>
       inspectHiggsfieldProvider({
         now: input.now,
+        includeNano: true,
         listTools: async (cursor) => {
           const result = await client.listTools(cursor ? { cursor } : undefined, {
             signal,

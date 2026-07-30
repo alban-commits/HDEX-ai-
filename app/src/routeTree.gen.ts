@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiUserRouteImport } from './routes/api/user'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiOpenaiProfileRouteImport } from './routes/api/openai/profile'
+import { Route as ApiOpenaiHorizonRouteImport } from './routes/api/openai/horizon'
 import { Route as ApiMediaUploadRouteImport } from './routes/api/media/upload'
 import { Route as ApiHiggsfieldAdapterRouteImport } from './routes/api/higgsfield/adapter'
 import { Route as ApiHiggsfieldResultJobIdRouteImport } from './routes/api/higgsfield/result/$jobId'
@@ -52,6 +53,11 @@ const ApiHealthRoute = ApiHealthRouteImport.update({
 const ApiOpenaiProfileRoute = ApiOpenaiProfileRouteImport.update({
   id: '/api/openai/profile',
   path: '/api/openai/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiOpenaiHorizonRoute = ApiOpenaiHorizonRouteImport.update({
+  id: '/api/openai/horizon',
+  path: '/api/openai/horizon',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiMediaUploadRoute = ApiMediaUploadRouteImport.update({
@@ -109,6 +115,7 @@ export interface FileRoutesByFullPath {
   '/api/user': typeof ApiUserRoute
   '/api/higgsfield/adapter': typeof ApiHiggsfieldAdapterRoute
   '/api/media/upload': typeof ApiMediaUploadRoute
+  '/api/openai/horizon': typeof ApiOpenaiHorizonRoute
   '/api/openai/profile': typeof ApiOpenaiProfileRoute
   '/api/higgsfield/oauth/callback': typeof ApiHiggsfieldOauthCallbackRoute
   '/api/higgsfield/oauth/capabilities': typeof ApiHiggsfieldOauthCapabilitiesRoute
@@ -125,6 +132,7 @@ export interface FileRoutesByTo {
   '/api/user': typeof ApiUserRoute
   '/api/higgsfield/adapter': typeof ApiHiggsfieldAdapterRoute
   '/api/media/upload': typeof ApiMediaUploadRoute
+  '/api/openai/horizon': typeof ApiOpenaiHorizonRoute
   '/api/openai/profile': typeof ApiOpenaiProfileRoute
   '/api/higgsfield/oauth/callback': typeof ApiHiggsfieldOauthCallbackRoute
   '/api/higgsfield/oauth/capabilities': typeof ApiHiggsfieldOauthCapabilitiesRoute
@@ -142,6 +150,7 @@ export interface FileRoutesById {
   '/api/user': typeof ApiUserRoute
   '/api/higgsfield/adapter': typeof ApiHiggsfieldAdapterRoute
   '/api/media/upload': typeof ApiMediaUploadRoute
+  '/api/openai/horizon': typeof ApiOpenaiHorizonRoute
   '/api/openai/profile': typeof ApiOpenaiProfileRoute
   '/api/higgsfield/oauth/callback': typeof ApiHiggsfieldOauthCallbackRoute
   '/api/higgsfield/oauth/capabilities': typeof ApiHiggsfieldOauthCapabilitiesRoute
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/api/user'
     | '/api/higgsfield/adapter'
     | '/api/media/upload'
+    | '/api/openai/horizon'
     | '/api/openai/profile'
     | '/api/higgsfield/oauth/callback'
     | '/api/higgsfield/oauth/capabilities'
@@ -176,6 +186,7 @@ export interface FileRouteTypes {
     | '/api/user'
     | '/api/higgsfield/adapter'
     | '/api/media/upload'
+    | '/api/openai/horizon'
     | '/api/openai/profile'
     | '/api/higgsfield/oauth/callback'
     | '/api/higgsfield/oauth/capabilities'
@@ -192,6 +203,7 @@ export interface FileRouteTypes {
     | '/api/user'
     | '/api/higgsfield/adapter'
     | '/api/media/upload'
+    | '/api/openai/horizon'
     | '/api/openai/profile'
     | '/api/higgsfield/oauth/callback'
     | '/api/higgsfield/oauth/capabilities'
@@ -209,6 +221,7 @@ export interface RootRouteChildren {
   ApiUserRoute: typeof ApiUserRoute
   ApiHiggsfieldAdapterRoute: typeof ApiHiggsfieldAdapterRoute
   ApiMediaUploadRoute: typeof ApiMediaUploadRoute
+  ApiOpenaiHorizonRoute: typeof ApiOpenaiHorizonRoute
   ApiOpenaiProfileRoute: typeof ApiOpenaiProfileRoute
   ApiHiggsfieldOauthCallbackRoute: typeof ApiHiggsfieldOauthCallbackRoute
   ApiHiggsfieldOauthCapabilitiesRoute: typeof ApiHiggsfieldOauthCapabilitiesRoute
@@ -260,6 +273,13 @@ declare module '@tanstack/react-router' {
       path: '/api/openai/profile'
       fullPath: '/api/openai/profile'
       preLoaderRoute: typeof ApiOpenaiProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/openai/horizon': {
+      id: '/api/openai/horizon'
+      path: '/api/openai/horizon'
+      fullPath: '/api/openai/horizon'
+      preLoaderRoute: typeof ApiOpenaiHorizonRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/media/upload': {
@@ -329,6 +349,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiUserRoute: ApiUserRoute,
   ApiHiggsfieldAdapterRoute: ApiHiggsfieldAdapterRoute,
   ApiMediaUploadRoute: ApiMediaUploadRoute,
+  ApiOpenaiHorizonRoute: ApiOpenaiHorizonRoute,
   ApiOpenaiProfileRoute: ApiOpenaiProfileRoute,
   ApiHiggsfieldOauthCallbackRoute: ApiHiggsfieldOauthCallbackRoute,
   ApiHiggsfieldOauthCapabilitiesRoute: ApiHiggsfieldOauthCapabilitiesRoute,
