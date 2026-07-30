@@ -167,6 +167,8 @@ describe("existing product UI regression boundary", () => {
     expect(component).toContain("if (files.length > HORIZON_MAX_FOLDER_FILES)");
     expect(component).toContain('savedFiles: saved.savedFiles');
     expect(component).toContain('saveFailureCount: saved.failureCount');
+    expect(component).toContain("const status = settleHorizonBatchStatus(item.status);");
+    expect(component).toContain("일괄 작업이 중단되어 완료하지 못했습니다.");
     const chooseBatchDirectory = component.slice(
       component.indexOf("const chooseBatchDirectory"),
       component.indexOf("const rescanBatchDirectory"),

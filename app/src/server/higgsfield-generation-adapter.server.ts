@@ -440,8 +440,15 @@ async function parseAndPersistCreatedJobs(
         resultLineage = "omitted";
       }
     } else if (
-      (persistence.jobSetType === "gpt_image_2" || persistence.jobSetType === "nano_banana_2") &&
-      explicitModel === expectedModelId
+      persistence.jobSetType === "nano_banana_2" &&
+      expectedModelId === "nano_banana_pro"
+    ) {
+      if (explicitModel === "nano_banana_pro") resultLineage = "provider_model";
+      else if (explicitModel === "nano_banana_2") resultLineage = "public_job_type";
+    } else if (
+      persistence.jobSetType === "gpt_image_2" &&
+      expectedModelId === "gpt_image_2" &&
+      explicitModel === "gpt_image_2"
     ) {
       resultLineage = "provider_model";
     }

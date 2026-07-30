@@ -12,13 +12,13 @@ import { downloadMedia } from "@/lib/download-media";
 import { HorizonDirectoryScanError, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchResults, scanHorizonDirectory, supportsHorizonDirectoryPicker, type HorizonDirectoryHandle, type HorizonDirectoryPermission } from "@/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY as HISTORY_QUERY, syncHorizonHistory } from "@/lib/horizon-history";
 import { composeHorizonPrompt, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "@/lib/horizon.browser";
-import { HORIZON_MAX_FOLDER_FILES, HORIZON_MAX_IMAGES, HORIZON_RATIOS, HORIZON_SLOTS, HORIZON_VIEWS, boundedHorizonFolderFiles, claimHorizonImageReservation, horizonBatchProgress, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, scanHorizonFolder, selectHorizonImages, type HorizonBatchDownload, type HorizonBatchJob, type HorizonEngine, type HorizonImage, type HorizonView } from "@/lib/horizon";
+import { HORIZON_MAX_FOLDER_FILES, HORIZON_MAX_IMAGES, HORIZON_RATIOS, HORIZON_SLOTS, HORIZON_VIEWS, boundedHorizonFolderFiles, claimHorizonImageReservation, horizonBatchProgress, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus, type HorizonBatchDownload, type HorizonBatchJob, type HorizonBatchStatus, type HorizonEngine, type HorizonImage, type HorizonView } from "@/lib/horizon";
 import { disconnectHiggsfieldOAuth, GUEST_SCOPE_KEY, getReconnectSignInUrl, getSignInUrl, PRESET_JOBS, releaseLocalUpload, subscribeHiggsfieldReconnect } from "@/lib/fnf.browser";
 import "./horizon-workspace.css";
 
 type GenerationInput = SubmitInputFor<typeof PRESET_JOBS>;
 type StoredImage = HorizonImage & { asset: AssetSelection };
-type BatchState = HorizonBatchJob & { status: "queued" | "prompting" | "generating" | "saving" | "completed" | "failed"; message?: string; results?: HorizonBatchDownload[]; savedFiles?: string[]; saveFailureCount?: number; successCount?: number; failureCount?: number };
+type BatchState = HorizonBatchJob & { status: HorizonBatchStatus; message?: string; results?: HorizonBatchDownload[]; savedFiles?: string[]; saveFailureCount?: number; successCount?: number; failureCount?: number };
 type HorizonGalleryItem = NonNullable<ReturnType<typeof generationToGalleryItem>>;
 type AccountMutation = "reconnect" | "disconnect";
 const LazyUserGenerations = lazy(async () => ({ default: (await import("@/components/user-generations")).UserGenerations }));
@@ -394,7 +394,13 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
           });
         } catch { setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "failed", message: "작업을 완료하지 못했습니다." } : item)); }
       }
-    } finally { batchActive.current = false; setBatchRunning(false); }
+    } finally {
+      setBatch((items) => items.map((item) => {
+        const status = settleHorizonBatchStatus(item.status);
+        return status === item.status ? item : { ...item, status, message: "일괄 작업이 중단되어 완료하지 못했습니다." };
+      }));
+      batchActive.current = false; setBatchRunning(false);
+    }
   };
 
   const downloadBatchResults = async (results: readonly HorizonBatchDownload[]) => {

@@ -11,6 +11,11 @@ export type HorizonView = (typeof HORIZON_VIEWS)[number];
 export type HorizonRole = "model" | "wardrobe" | "accessory";
 export type HorizonEngine = "gpt-2k" | "nano-2k" | "nano-4k";
 export type HorizonBatchDownload = { url: string; filename: string };
+export type HorizonBatchStatus = "queued" | "prompting" | "generating" | "saving" | "completed" | "failed";
+
+export function settleHorizonBatchStatus(status: HorizonBatchStatus): HorizonBatchStatus {
+  return status === "prompting" || status === "generating" || status === "saving" ? "failed" : status;
+}
 
 type HorizonGenerationIdentity = {
   input: {

@@ -8,7 +8,7 @@ import { createJobClient, type Generation, type ListResult } from "@higgsfield/f
 import { nanoBanana2 } from "@higgsfield/fnf/jobs";
 import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
-import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, claimHorizonImageReservation, horizonBatchProgress, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, scanHorizonFolder, selectHorizonImages } from "../src/lib/horizon";
+import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, claimHorizonImageReservation, horizonBatchProgress, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
 import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
@@ -185,6 +185,7 @@ describe("Horizon selection and folder contracts", () => {
       { ready: true, status: "failed" },
       { ready: false, status: "queued" },
     ])).toEqual({ processed: 2, total: 2, percent: 100 });
+    expect(["failed", "prompting"].map((status) => settleHorizonBatchStatus(status as "failed" | "prompting"))).toEqual(["failed", "failed"]);
   });
 
   test("switches recent results immediately by the selected engine and resolution", () => {
@@ -580,6 +581,45 @@ describe("Nano Banana Pro MCP boundary", () => {
     expect(calls).toHaveLength(1); expect(calls[0]?.name).toBe("generate_image");
     expect(calls[0]?.args).toMatchObject({params:{model:"nano_banana_pro",resolution:"4k",medias:[{role:"reference",value:"media-a"}]}});
     await clearGenerationRuntime(fingerprint,env);
+  });
+
+  test("accepts only Nano provider/public lineages and keeps GPT exact with one create each", async () => {
+    const record=await inspectHiggsfieldProvider({includeNano:true,now:NOW,listTools:async()=>({tools:toolList}),callTool:async(_name,args)=>({structuredContent:model(String(args.model_id))})});
+    const scenarios = [
+      { jobSetType: "nano_banana_2" as const, responseModel: "nano_banana_pro", lineage: "provider_model", accepted: true, marker: "p" },
+      { jobSetType: "nano_banana_2" as const, responseModel: "nano_banana_2", lineage: "public_job_type", accepted: true, marker: "j" },
+      { jobSetType: "nano_banana_2" as const, responseModel: "nano_banana_v2", lineage: "conflict", accepted: false, marker: "x" },
+      { jobSetType: "gpt_image_2" as const, responseModel: "gpt_image_2", lineage: "provider_model", accepted: true, marker: "g" },
+    ];
+    for (const [index, scenario] of scenarios.entries()) {
+      const activeSession = { ...session, browserSessionId: scenario.marker.repeat(43) };
+      const fingerprint = higgsfieldOAuthSessionFingerprint(activeSession);
+      await inspectHiggsfieldCapabilities({sessionFingerprint:fingerprint,mcpUrl:activeSession.resource,accessToken:activeSession.accessToken,now:NOW,runner:async()=>record});
+      let generateCalls = 0;
+      let diagnostic: { modelLineage: string } | undefined;
+      const request = createHiggsfieldGeneration({
+        fingerprint,
+        session: activeSession,
+        jobSetType: scenario.jobSetType,
+        params: scenario.jobSetType === "nano_banana_2"
+          ? { prompt: "safe prompt", aspect_ratio: "2:3", resolution: "2k", batch_size: 1, input_images: [] }
+          : { prompt: "safe prompt", aspect_ratio: "3:2", resolution: "2k", quality: "high", batch_size: 1, medias: [] },
+        confirmationToken: `lineage-request-${index}`,
+        env,
+        now: NOW,
+        callTool: async () => {
+          generateCalls += 1;
+          return { structuredContent: { results: [{ id: `lineage-job-${index}`, model: scenario.responseModel, status: "queued" }] } };
+        },
+        onGenerationDiagnostic: (value) => { diagnostic = value; },
+      });
+      if (scenario.accepted) await expect(request).resolves.toHaveLength(1);
+      else await expect(request).rejects.toMatchObject({ code: "job_mismatch", status: 502 });
+      expect(generateCalls).toBe(1);
+      expect(diagnostic?.modelLineage).toBe(scenario.lineage);
+      clearHiggsfieldRuntime(fingerprint);
+      await clearGenerationRuntime(fingerprint, env);
+    }
   });
 
   test("round-trips Nano input_images and resolution through create/get/list clients", async () => {
