@@ -13,8 +13,23 @@ export type HorizonEngine = "gpt-2k" | "nano-2k" | "nano-4k";
 export type HorizonBatchDownload = { url: string; filename: string };
 export type HorizonBatchStatus = "queued" | "prompting" | "generating" | "saving" | "completed" | "failed";
 
-export function settleHorizonBatchStatus(status: HorizonBatchStatus): HorizonBatchStatus {
-  return status === "prompting" || status === "generating" || status === "saving" ? "failed" : status;
+export function settleHorizonBatchStatus(status: HorizonBatchStatus, ready: boolean): HorizonBatchStatus {
+  return ready && status !== "completed" && status !== "failed" ? "failed" : status;
+}
+
+export async function runHorizonBatchSequence<T extends { ready: boolean }>(
+  items: readonly T[],
+  process: (item: T) => Promise<void>,
+  onFailure: (item: T) => void,
+): Promise<void> {
+  for (const item of items) {
+    if (!item.ready) continue;
+    try {
+      await process(item);
+    } catch {
+      onFailure(item);
+    }
+  }
 }
 
 type HorizonGenerationIdentity = {

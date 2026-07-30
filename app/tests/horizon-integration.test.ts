@@ -8,7 +8,7 @@ import { createJobClient, type Generation, type ListResult } from "@higgsfield/f
 import { nanoBanana2 } from "@higgsfield/fnf/jobs";
 import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
-import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, claimHorizonImageReservation, horizonBatchProgress, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
+import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, claimHorizonImageReservation, horizonBatchProgress, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
 import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
@@ -185,7 +185,28 @@ describe("Horizon selection and folder contracts", () => {
       { ready: true, status: "failed" },
       { ready: false, status: "queued" },
     ])).toEqual({ processed: 2, total: 2, percent: 100 });
-    expect(["failed", "prompting"].map((status) => settleHorizonBatchStatus(status as "failed" | "prompting"))).toEqual(["failed", "failed"]);
+    expect([
+      settleHorizonBatchStatus("queued", true),
+      settleHorizonBatchStatus("prompting", true),
+      settleHorizonBatchStatus("queued", false),
+    ]).toEqual(["failed", "failed", "queued"]);
+  });
+
+  test("continues after one runnable batch item fails and settles interrupted work", async () => {
+    const processed: string[] = [];
+    const failed: string[] = [];
+    const jobs = [
+      { key: "first", ready: true, status: "queued" as const },
+      { key: "second", ready: true, status: "queued" as const },
+      { key: "excluded", ready: false, status: "queued" as const },
+    ];
+    await runHorizonBatchSequence(jobs, async (job) => {
+      processed.push(job.key);
+      if (job.key === "first") throw new Error("mock create failure");
+    }, (job) => failed.push(job.key));
+    expect(processed).toEqual(["first", "second"]);
+    expect(failed).toEqual(["first"]);
+    expect(jobs.map((job) => settleHorizonBatchStatus(job.status, job.ready))).toEqual(["failed", "failed", "queued"]);
   });
 
   test("switches recent results immediately by the selected engine and resolution", () => {
