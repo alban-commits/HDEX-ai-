@@ -98,6 +98,9 @@ describe("existing product UI regression boundary", () => {
     const contract = normalizeLineEndings(
       await readFile(new URL("../src/lib/horizon.ts", import.meta.url), "utf8"),
     );
+    const styles = normalizeLineEndings(
+      await readFile(new URL("../src/layouts/horizon-workspace.css", import.meta.url), "utf8"),
+    );
     const source = `${component}\n${contract}`;
     for (const copy of [
       "패션 이미지 생성", "모델 참조", "모델 정면", "모델 측면/45도", "모델 후면",
@@ -112,6 +115,7 @@ describe("existing product UI regression boundary", () => {
       "폴더에서 이 카드로 드래그앤드롭 가능",
       "촬영 방향을 선택하면 해당 방향의 모델 이미지만 기준으로 전송됩니다.",
       "AUTO JSON →", "아직 생성된 이미지가 없습니다.",
+      "직원 공용",
     ]) expect(source).toContain(copy);
     expect(source).not.toContain("OPENAI_API_KEY 입력");
     expect(source).not.toContain("계정 드롭다운");
@@ -123,6 +127,25 @@ describe("existing product UI regression boundary", () => {
     expect(component).toContain("promptBusy || promptFlight.current");
     expect(component).toContain("claimHorizonImageReservation(imagesRef.current.length, uploadReservations.current, files.length)");
     expect(component).toContain("uploadReservations.current = Math.max(0, uploadReservations.current - files.length)");
+    expect(component).toContain("slotUploadLocks.current.has(slotId)");
+    expect(component).toContain("dragDepths.current.set(slotId, (dragDepths.current.get(slotId) ?? 0) + 1)");
+    expect(component).toContain('slotDragging?"여기에 놓아 업로드":"여러 장 선택"');
+    expect(component).toContain('slotUploading?"업로드 중…"');
+    expect(component).toContain("aria-busy={slotUploading}");
+    expect(component).toContain("accountActionFlight.current");
+    expect(component).toContain('window.confirm("현재 브라우저의 선택 이미지와 작업 상태가 초기화됩니다. 계속할까요?")');
+    expect(component).toContain('title="현재 연결을 끊고 다른 Higgsfield 계정으로 로그인"');
+    expect(component).toContain('title="이 브라우저의 Higgsfield 연결만 해제"');
+    expect(component).toContain('accountAction==="reconnect"?"계정 변경 중…":"계정 변경"');
+    expect(component).toContain('accountAction==="disconnect"?"연결 해제 중…":"연결 해제"');
+    expect(styles).toContain(".hz-auth-button:hover:not(:disabled)");
+    expect(styles).toContain(".hz-auth-button:focus-visible");
+    expect(styles).toContain(".hz-auth-button:active:not(:disabled)");
+    expect(styles).toContain(".hz-auth-disconnect:hover:not(:disabled)");
+    expect(styles).toContain(".hz-account-state {");
+    expect(styles).toContain("cursor: default;");
+    expect(styles).toContain(".hz-upload.drag-active {");
+    expect(styles).toContain(".hz-upload.uploading {");
     expect(component).toContain("onParentWorkspaceReset();");
     expect(component).toContain('<button type="button" className="hz-ref-toggle"');
     expect(component).toContain('aria-pressed={image.selected}');

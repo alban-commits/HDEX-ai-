@@ -169,6 +169,50 @@
   display: grid;
   place-items: center;
 }
+.hz-auth-button {
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 80ms ease;
+}
+.hz-account-state {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  cursor: default;
+  font-size: 10px;
+}
+.hz-auth-button:hover:not(:disabled),
+.hz-auth-button:focus-visible {
+  border-color: rgba(163, 255, 98, 0.78);
+  background: rgba(163, 255, 98, 0.18);
+  color: #d9ffc0;
+  box-shadow: 0 0 0 3px rgba(163, 255, 98, 0.1);
+}
+.hz-auth-button:focus-visible {
+  outline: 2px solid var(--hz-accent);
+  outline-offset: 2px;
+}
+.hz-auth-button:active:not(:disabled) {
+  transform: translateY(1px);
+  background: rgba(163, 255, 98, 0.26);
+}
+.hz-auth-disconnect {
+  border-color: rgba(255, 143, 143, 0.38);
+  background: rgba(255, 91, 91, 0.07);
+  color: #ffb2b2;
+}
+.hz-auth-disconnect:hover:not(:disabled),
+.hz-auth-disconnect:focus-visible {
+  border-color: rgba(255, 143, 143, 0.82);
+  background: rgba(255, 91, 91, 0.18);
+  color: #ffe0e0;
+  box-shadow: 0 0 0 3px rgba(255, 91, 91, 0.1);
+}
+.hz-auth-disconnect:focus-visible {
+  outline-color: #ff9f9f;
+}
+.hz-auth-disconnect:active:not(:disabled) {
+  background: rgba(255, 91, 91, 0.27);
+}
 .hz-auth-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -238,6 +282,23 @@
   overflow: hidden;
   background: #0b1018;
   padding: 0 10px 10px;
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+.hz-upload.drag-active {
+  border-color: rgba(163, 255, 98, 0.95);
+  background: rgba(35, 61, 34, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(163, 255, 98, 0.3), 0 0 22px rgba(91, 232, 143, 0.16);
+}
+.hz-upload.uploading {
+  border-color: rgba(91, 232, 143, 0.72);
+  background: rgba(26, 48, 38, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(91, 232, 143, 0.2);
+}
+.hz-upload.drag-active .hz-upload-add strong,
+.hz-upload.uploading .hz-upload-add strong {
+  border-color: rgba(163, 255, 98, 0.82);
+  background: rgba(163, 255, 98, 0.12);
+  color: #d9ffc0;
 }
 .hz-upload-add {
   position: relative;

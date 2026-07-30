@@ -18,6 +18,7 @@ type GenerationInput = SubmitInputFor<typeof PRESET_JOBS>;
 type StoredImage = HorizonImage & { asset: AssetSelection };
 type BatchState = HorizonBatchJob & { status: "queued" | "prompting" | "generating" | "saving" | "completed" | "failed"; message?: string; results?: HorizonBatchDownload[]; successCount?: number; failureCount?: number };
 type HorizonGalleryItem = NonNullable<ReturnType<typeof generationToGalleryItem>>;
+type AccountMutation = "reconnect" | "disconnect";
 const HISTORY_QUERY = { type: "image" as const, size: 40 };
 const LazyUserGenerations = lazy(async () => ({ default: (await import("@/components/user-generations")).UserGenerations }));
 
@@ -59,6 +60,12 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
   const imagesRef = useRef<StoredImage[]>([]);
   const uploadReservations = useRef(0);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const slotUploadLocks = useRef(new Set<string>());
+  const [uploadingSlots, setUploadingSlots] = useState<Set<string>>(() => new Set());
+  const dragDepths = useRef(new Map<string, number>());
+  const [draggingSlots, setDraggingSlots] = useState<Set<string>>(() => new Set());
+  const accountActionFlight = useRef(false);
+  const [accountAction, setAccountAction] = useState<AccountMutation | null>(null);
   const generationActive = useRef(false);
   const promptFlight = useRef<Promise<string | null> | null>(null);
 
@@ -85,9 +92,12 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
 
   const addFiles = async (slotId: string, files: File[]) => {
     if (batchRunning || batchActive.current) { setMessage("일괄 작업 중에는 참조 이미지를 변경할 수 없습니다."); return; }
+    if (!files.length || slotUploadLocks.current.has(slotId)) return;
     const reservation = claimHorizonImageReservation(imagesRef.current.length, uploadReservations.current, files.length);
     if (reservation === null) { setMessage(`참조 이미지는 최대 ${HORIZON_MAX_IMAGES}장까지 선택할 수 있습니다.`); return; }
     uploadReservations.current = reservation;
+    slotUploadLocks.current.add(slotId);
+    setUploadingSlots((current) => new Set(current).add(slotId));
     setUploadBusy(true);
     try {
       const assets = await uploadHorizonAssets(files);
@@ -99,9 +109,26 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
     } catch {
       setMessage("이미지 업로드를 완료하지 못해 이번 선택을 취소했습니다.");
     } finally {
+      slotUploadLocks.current.delete(slotId);
+      setUploadingSlots((current) => { const next = new Set(current); next.delete(slotId); return next; });
       uploadReservations.current = Math.max(0, uploadReservations.current - files.length);
       if (uploadReservations.current === 0) setUploadBusy(false);
     }
+  };
+  const beginSlotDrag = (slotId: string) => {
+    if (batchRunning || batchActive.current || slotUploadLocks.current.has(slotId)) return;
+    dragDepths.current.set(slotId, (dragDepths.current.get(slotId) ?? 0) + 1);
+    setDraggingSlots((current) => new Set(current).add(slotId));
+  };
+  const endSlotDrag = (slotId: string) => {
+    const depth = Math.max(0, (dragDepths.current.get(slotId) ?? 0) - 1);
+    if (depth > 0) { dragDepths.current.set(slotId, depth); return; }
+    dragDepths.current.delete(slotId);
+    setDraggingSlots((current) => { const next = new Set(current); next.delete(slotId); return next; });
+  };
+  const clearSlotDrag = (slotId: string) => {
+    dragDepths.current.delete(slotId);
+    setDraggingSlots((current) => { const next = new Set(current); next.delete(slotId); return next; });
   };
   const removeImage = (id: string) => { if (batchRunning || batchActive.current) { setMessage("일괄 작업 중에는 참조 이미지를 변경할 수 없습니다."); return; } setImages((current) => { const target = current.find((item) => item.id === id); if (target?.asset.ref?.id) releaseLocalUpload(target.asset.ref.id); return renumberHorizonImages(current.filter((item) => item.id !== id)).map((item) => ({ ...item, category: slotCategory(item.slotId,item.code) })) as StoredImage[]; }); invalidate(); };
   const toggleImage = (id: string) => { if (batchRunning || batchActive.current) { setMessage("일괄 작업 중에는 참조 이미지 선택을 바꿀 수 없습니다."); return; } setImages((current) => current.map((item) => item.id === id ? { ...item, selected: !item.selected } : item)); invalidate(); };
@@ -173,7 +200,7 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
       setMessage("일부 결과를 저장하지 못했습니다. 각 결과에서 다시 시도해 주세요.");
     }
   };
-  const accountMutationBlocked = parentBusy || run.isRunning || batchRunning || promptBusy || uploadBusy;
+  const accountMutationBlocked = parentBusy || run.isRunning || batchRunning || promptBusy || uploadBusy || accountAction !== null;
   const clearCurrentBrowserWorkspace = () => {
     for (const image of imagesRef.current) if (image.asset.ref?.id) releaseLocalUpload(image.asset.ref.id);
     imagesRef.current = [];
@@ -190,7 +217,13 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
     onBack();
   };
   const disconnect = async (reconnect: boolean) => {
+    if (accountActionFlight.current) return;
     if (parentBusy || run.isRunning || batchRunning || batchActive.current || generationActive.current || promptBusy || promptFlight.current || uploadReservations.current > 0) { setMessage("처리 중에는 계정을 변경하거나 연결 해제할 수 없습니다."); return; }
+    const hasCurrentWorkspaceState = imagesRef.current.length > 0 || brief.trim().length > 0 || command.trim().length > 0 || batch.length > 0 || run.generations.length > 0;
+    if (hasCurrentWorkspaceState && !window.confirm("현재 브라우저의 선택 이미지와 작업 상태가 초기화됩니다. 계속할까요?")) return;
+    const action: AccountMutation = reconnect ? "reconnect" : "disconnect";
+    accountActionFlight.current = true;
+    setAccountAction(action);
     try {
       await disconnectHiggsfieldOAuth();
       clearCurrentBrowserWorkspace();
@@ -201,6 +234,9 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
       } else window.location.reload();
     } catch {
       setMessage("현재 브라우저의 Higgsfield 연결을 해제하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      accountActionFlight.current = false;
+      setAccountAction(null);
     }
   };
 
@@ -256,9 +292,9 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
     <aside className="hz-sidebar"><div className="hz-brand"><div className="hz-logo">H</div> AI HORIZON</div><nav className="hz-nav"><button className="active">이미지 생성</button><button disabled={accountMutationBlocked} onClick={reset}>전체 초기화</button><button disabled={accountMutationBlocked} onClick={leaveHorizon}>인플루언서 콘텐츠</button></nav><div className="hz-side-note">자동화 규격 <b>AUTO FOLDER V5</b><br/>브라우저에서 선택한 폴더별 결과를 완성합니다.</div></aside>
     <main className="hz-main"><div className="hz-content">
       <header className="hz-topbar"><div><h1>패션 이미지 생성</h1><p>개별 이미지 또는 번호 폴더 전체를 각자의 계정으로 자동 생성합니다.</p></div><div className="hz-statuses"><span className="hz-status ok">PERSONAL DISTRIBUTION V17</span><span className="hz-status ok">회사 OpenAI 서버</span><span className={`hz-status ${connection.status === "connected" ? "ok" : ""}`}>{connection.label}</span></div></header>
-      <section className="hz-account-panel"><div className="hz-account-card"><div><h3>회사 OpenAI 서버</h3><p>Windows NSSM의 OPENAI_API_KEY를 직원 전체가 공용 사용합니다.</p></div><span className="hz-account-state">서버 관리</span></div><div className="hz-account-card"><div><h3>내 Higgsfield 계정</h3><p>{accountMutationBlocked?"작업 진행 중에는 계정 변경과 연결 해제를 사용할 수 없습니다.":"회사 배정 계정은 OAuth 제공자 화면에서 선택합니다."}</p></div>{resolvedScopeKey===undefined?<button className="hz-auth-button" disabled>연결 확인 중</button>:scopeKey===GUEST_SCOPE_KEY?<button className="hz-auth-button" onClick={()=>requireSignIn()}>연결</button>:<div className="hz-account-actions"><button className="hz-auth-button" disabled={accountMutationBlocked} onClick={()=>void disconnect(true)}>계정 변경</button><button className="hz-auth-button" disabled={accountMutationBlocked} onClick={()=>void disconnect(false)}>연결 해제</button></div>}</div></section>
+      <section className="hz-account-panel"><div className="hz-account-card"><div><h3>회사 OpenAI 서버</h3><p>Windows NSSM의 OPENAI_API_KEY를 직원 전체가 공용 사용합니다.</p></div><span className="hz-account-state">직원 공용</span></div><div className="hz-account-card"><div><h3>내 Higgsfield 계정</h3><p>{accountMutationBlocked?"작업 진행 중에는 계정 변경과 연결 해제를 사용할 수 없습니다.":"회사 배정 계정은 OAuth 제공자 화면에서 선택합니다."}</p></div>{resolvedScopeKey===undefined?<button className="hz-auth-button" disabled>연결 확인 중</button>:scopeKey===GUEST_SCOPE_KEY?<button className="hz-auth-button" onClick={()=>requireSignIn()}>연결</button>:<div className="hz-account-actions"><button className="hz-auth-button hz-auth-switch" title="현재 연결을 끊고 다른 Higgsfield 계정으로 로그인" disabled={accountMutationBlocked} onClick={()=>void disconnect(true)}>{accountAction==="reconnect"?"계정 변경 중…":"계정 변경"}</button><button className="hz-auth-button hz-auth-disconnect" title="이 브라우저의 Higgsfield 연결만 해제" disabled={accountMutationBlocked} onClick={()=>void disconnect(false)}>{accountAction==="disconnect"?"연결 해제 중…":"연결 해제"}</button></div>}</div></section>
       <div className="hz-workspace"><div className="hz-steps">
-        {(["model","wardrobe","accessory"] as const).map((group,index)=><section className="hz-step" key={group}><div className="hz-step-head"><div className="hz-num">0{index+1}</div><div><h3>{group==="model"?"모델 참조":group==="wardrobe"?"의상 참조":"액세서리 참조"}</h3><p>{group==="model"?"인물과 포즈를 유지할 기준 이미지를 올려주세요.":group==="wardrobe"?"전신 착장 또는 상의·하의 디테일 이미지를 올려주세요.":"가방, 모자, 주얼리, 신발 등 필요한 항목만 선택하세요."}</p></div></div><div className="hz-upload-grid">{HORIZON_SLOTS.filter((slot)=>slot.group===group).map((slot)=>{const items=images.filter((image)=>image.slotId===slot.id);return <div className={`hz-upload ${items.length?"has-items":""}`} key={slot.id} aria-disabled={batchRunning} onDragOver={(event)=>event.preventDefault()} onDrop={(event)=>{event.preventDefault();void addFiles(slot.id,[...event.dataTransfer.files]);}}><label className="hz-upload-add"><input type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={batchRunning} onChange={(event)=>{void addFiles(slot.id,[...(event.target.files??[])]);event.currentTarget.value="";}}/><span className="hz-upload-copy"><b>{slot.label}</b><strong>여러 장 선택</strong><small>한 번에 여러 장 또는 반복해서 계속 추가</small><small className="hz-drop-copy">폴더에서 이 카드로 드래그앤드롭 가능</small></span><em>{items.length}장</em><i>{slot.hint}</i></label><div className="hz-thumb-list">{items.map((image)=><div className={`hz-ref-thumb ${image.selected?"selected":""}`} key={image.id}><button type="button" className="hz-ref-toggle" disabled={batchRunning} aria-pressed={image.selected} aria-label={`${image.code} ${slot.label} 적용 ${image.selected?"해제":"선택"}`} onClick={()=>toggleImage(image.id)}><img src={image.asset.src} alt=""/><span className="hz-ref-code">{image.code}</span><span className="hz-ref-check">{image.selected?"✓":"–"}</span></button><button type="button" className="hz-ref-remove" disabled={batchRunning} aria-label={`${image.code} 삭제`} onClick={()=>removeImage(image.id)}>×</button></div>)}</div></div>})}</div></section>)}
+        {(["model","wardrobe","accessory"] as const).map((group,index)=><section className="hz-step" key={group}><div className="hz-step-head"><div className="hz-num">0{index+1}</div><div><h3>{group==="model"?"모델 참조":group==="wardrobe"?"의상 참조":"액세서리 참조"}</h3><p>{group==="model"?"인물과 포즈를 유지할 기준 이미지를 올려주세요.":group==="wardrobe"?"전신 착장 또는 상의·하의 디테일 이미지를 올려주세요.":"가방, 모자, 주얼리, 신발 등 필요한 항목만 선택하세요."}</p></div></div><div className="hz-upload-grid">{HORIZON_SLOTS.filter((slot)=>slot.group===group).map((slot)=>{const items=images.filter((image)=>image.slotId===slot.id);const slotDragging=draggingSlots.has(slot.id);const slotUploading=uploadingSlots.has(slot.id);return <div className={`hz-upload ${items.length?"has-items":""} ${slotDragging?"drag-active":""} ${slotUploading?"uploading":""}`} key={slot.id} aria-disabled={batchRunning||slotUploading} aria-busy={slotUploading} onDragEnter={(event)=>{event.preventDefault();beginSlotDrag(slot.id);}} onDragLeave={(event)=>{event.preventDefault();endSlotDrag(slot.id);}} onDragOver={(event)=>{event.preventDefault();event.dataTransfer.dropEffect="copy";}} onDrop={(event)=>{event.preventDefault();clearSlotDrag(slot.id);void addFiles(slot.id,[...event.dataTransfer.files]);}}><label className="hz-upload-add"><input type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={batchRunning||slotUploading} onChange={(event)=>{void addFiles(slot.id,[...(event.target.files??[])]);event.currentTarget.value="";}}/><span className="hz-upload-copy"><b>{slot.label}</b><strong>{slotUploading?"업로드 중…":slotDragging?"여기에 놓아 업로드":"여러 장 선택"}</strong><small>{slotUploading?"이미지를 안전하게 처리하고 있습니다.":"한 번에 여러 장 또는 반복해서 계속 추가"}</small><small className="hz-drop-copy">{slotDragging?"마우스를 놓으면 이 카드에 추가됩니다.":"폴더에서 이 카드로 드래그앤드롭 가능"}</small></span><em>{items.length}장</em><i>{slot.hint}</i></label><div className="hz-thumb-list">{items.map((image)=><div className={`hz-ref-thumb ${image.selected?"selected":""}`} key={image.id}><button type="button" className="hz-ref-toggle" disabled={batchRunning} aria-pressed={image.selected} aria-label={`${image.code} ${slot.label} 적용 ${image.selected?"해제":"선택"}`} onClick={()=>toggleImage(image.id)}><img src={image.asset.src} alt=""/><span className="hz-ref-code">{image.code}</span><span className="hz-ref-check">{image.selected?"✓":"–"}</span></button><button type="button" className="hz-ref-remove" disabled={batchRunning} aria-label={`${image.code} 삭제`} onClick={()=>removeImage(image.id)}>×</button></div>)}</div></div>})}</div></section>)}
         <section className="hz-step"><div className="hz-step-head"><div className="hz-num">04</div><div><h3>선택 옵션 · 비워도 됨</h3><p>이미지만으로 자동 작성하거나 M1 W2 W3 A1처럼 사용할 번호만 적으세요.</p></div></div><div className="hz-fields"><textarea maxLength={1200} disabled={batchRunning} value={brief} onChange={(event)=>{setBrief(event.target.value);invalidate();}} placeholder="아무것도 쓰지 않아도 됩니다. 번호로 고르려면 예: M1 W2 W3 A1 / 추가 요청이 있을 때만 한국어로 작성"/><div className="hz-prompt-actions"><button className="hz-primary" disabled={promptBusy||batchRunning} onClick={()=>void writePrompt()}>{promptBusy?"자동 JSON 분석 중…":"이미지로 자동 JSON 명령어 작성"}</button><span className="hz-hint">{brief.length}/1200 · 빈칸 가능 · 번호만 입력 가능</span></div></div></section>
         <section className="hz-step"><div className="hz-step-head"><div className="hz-num">05</div><div><h3>최종 생성 명령어</h3><p>확인 후 필요한 부분만 직접 수정할 수 있습니다.</p></div></div><div className="hz-fields"><textarea className="hz-command" disabled={batchRunning} value={command} onChange={(event)=>setCommand(event.target.value)} placeholder="위의 ‘이미지로 자동 JSON 명령어 작성’을 누르면 여기에 결과가 표시됩니다."/><div className="hz-prompt-actions"><button className="hz-ghost" onClick={()=>void copyCommand()} disabled={!command||batchRunning}>명령어 복사</button><span className="hz-hint">직접 수정 가능</span></div></div></section>
         <section className="hz-step"><div className="hz-step-head"><div className="hz-num">06</div><div><h3>폴더 일괄 자동 생성</h3><p>모든 단계의 하위 폴더를 끝까지 읽고, 번호 이미지가 있는 폴더마다 결과를 생성합니다.</p></div></div><div className="hz-batch-fields"><label className="hz-batch-picker">자동 생성 루트 폴더 선택<input type="file" multiple accept="image/*" disabled={batchRunning||run.isRunning} ref={(node)=>{node?.setAttribute("webkitdirectory","");}} onChange={(event)=>{const files=event.currentTarget.files;event.currentTarget.value="";if(files)chooseFolder(files);}}/></label><div className="hz-batch-actions"><button className="hz-ghost" disabled={batchRunning||run.isRunning} onClick={()=>document.querySelector<HTMLInputElement>(".hz-batch-picker input")?.click()}>하위 폴더 전체 스캔</button><button className="hz-primary" disabled={!batch.some((job)=>job.ready)||batchRunning||run.isRunning} onClick={()=>void startBatch()}>일괄 자동 생성 시작</button>{allBatchResults.length?<button className="hz-ghost" disabled={batchRunning||run.isRunning} onClick={()=>void downloadBatchResults(allBatchResults)}>전체 배치 결과 저장</button>:null}</div><p className="hz-batch-note">중간 폴더가 여러 단계여도 자동으로 탐색합니다. 이미지 파일이 직접 들어 있는 각 폴더를 작업 하나로 인식하며, 오른쪽의 모델·비율·수량 설정이 전체에 적용됩니다. 1번 기준 모델이 없거나 이미지가 14장을 초과한 폴더는 제외됩니다.</p>{batch.length?<><div className="hz-batch-summary"><div><span>전체 폴더</span><b>{batch.length}</b></div><div><span>생성 가능</span><b>{batchProgress.total}</b></div><div><span>제외 폴더</span><b>{batch.filter((job)=>!job.ready).length}</b></div><div><span>처리 완료</span><b>{batchProgress.processed}/{batchProgress.total}</b></div></div><div className="hz-batch-progress"><div style={{width:`${batchProgress.percent}%`}}/></div><div className="hz-batch-list">{batch.map((job)=><div className="hz-batch-job" key={job.key}><span>{job.name} <small>· 입력 {job.files.length}장{job.message?` · ${job.message}`:""}</small></span><div className="hz-batch-job-actions"><b className={job.status==="failed"||!job.ready?"bad":"ok"}>{!job.ready?(job.error==="too_many_images"?"이미지 14장 초과":"1번 기준 모델 없음"):job.status}</b>{job.results?.length?<button type="button" className="hz-ghost" onClick={()=>void downloadBatchResults(job.results??[])}>폴더 결과 저장</button>:null}</div></div>)}</div></>:null}</div></section>
