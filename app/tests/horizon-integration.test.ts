@@ -127,7 +127,7 @@ describe("Horizon selection and folder contracts", () => {
     await expect(scanHorizonDirectory(directoryHandle("작업루트", entries))).rejects.toBeInstanceOf(HorizonDirectoryScanError);
   });
 
-  test("keeps duplicate numbered roles unique and rejects a folder with 15 applicable images", () => {
+  test("groups sub-numbered role images and rejects a folder with 15 applicable images", () => {
     const fourteen = [file("1.png", "root/look/1.png")];
     for (let index = 0; index < 13; index += 1) {
       fourteen.push(file(`3-${index + 1}.png`, `root/look/3-${index + 1}.png`));
@@ -135,7 +135,7 @@ describe("Horizon selection and folder contracts", () => {
     const accepted = scanHorizonFolder(fourteen)[0]!;
     expect(accepted.ready).toBe(true);
     expect(accepted.files.map((item) => item.category.split(" · ")[0])).toEqual([
-      "M1", "W2", "W2-2", "W2-3", "W2-4", "W2-5", "W2-6", "W2-7",
+      "M1", "W2-1", "W2-2", "W2-3", "W2-4", "W2-5", "W2-6", "W2-7",
       "W2-8", "W2-9", "W2-10", "W2-11", "W2-12", "W2-13",
     ]);
     const rejected = scanHorizonFolder([
@@ -144,6 +144,29 @@ describe("Horizon selection and folder contracts", () => {
     ])[0]!;
     expect(rejected).toMatchObject({ ready: false, error: "too_many_images" });
     expect(rejected.files).toHaveLength(15);
+  });
+
+  test("uses every 3-x and 4-x image as one ordered top or bottom reference group", () => {
+    const job = scanHorizonFolder([
+      file("1.jpg", "root/look/1.jpg"),
+      file("2.jpg", "root/look/2.jpg"),
+      file("3-3.jpg", "root/look/3-3.jpg"),
+      file("3-1.jpg", "root/look/3-1.jpg"),
+      file("3-2.jpg", "root/look/3-2.jpg"),
+      file("4-2.jpg", "root/look/4-2.jpg"),
+      file("4-1.jpg", "root/look/4-1.jpg"),
+    ])[0]!;
+
+    expect(job.ready).toBe(true);
+    expect(job.files.map((item) => item.category)).toEqual([
+      "M1 · 모델 기준",
+      "W1 · 전신 착장",
+      "W2-1 · 상의 디테일",
+      "W2-2 · 상의 디테일",
+      "W2-3 · 상의 디테일",
+      "W3-1 · 하의 디테일",
+      "W3-2 · 하의 디테일",
+    ]);
   });
 
   test("bounds folder scanning by file count and path depth", () => {
@@ -441,8 +464,8 @@ describe("Horizon browser mutation boundaries", () => {
 });
 
 describe("Horizon prompt contract", () => {
-  test("preserves the V5 schema, hierarchy, and golden compiled sections", () => {
-    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-angle-lock-v5-terra");
+  test("preserves the V6 schema, hierarchy, grouped references, and golden compiled sections", () => {
+    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v6-terra");
     expect(promptSchema().required).toHaveLength(16);
     const images = [{category:"M1 · 모델 정면"},{category:"W1 · 전신 착장"},{category:"A1 · 신발"}];
     const guard = referenceGuard(images);
@@ -453,6 +476,14 @@ describe("Horizon prompt contract", () => {
     expect(prompt).toContain("original base socks or bare-ankle state exactly");
     expect(prompt).toContain("FINAL OUTPUT: One centered subject only. 2:3 aspect ratio.");
     expect(buildCodexPrompt("M1 W1 A1","2:3","front",images)).toContain("USER BRIEF: M1 W1 A1");
+    const groupedPrompt = buildCodexPrompt("AUTO MODE","2:3","front",[
+      {category:"M1 · 모델 기준"},
+      {category:"W2-1 · 상의 디테일"},
+      {category:"W2-2 · 상의 디테일"},
+    ]);
+    expect(groupedPrompt).toContain("W2-1, W2-2, and W2-3 are one reference group");
+    expect(groupedPrompt).toContain("2. W2-1 · 상의 디테일");
+    expect(groupedPrompt).toContain("3. W2-2 · 상의 디테일");
   });
 
   test("rejects declared and actual bodies above 80 MiB before OpenAI", async () => {

@@ -257,12 +257,17 @@ export function scanHorizonFolder(files: readonly File[]): HorizonBatchJob[] {
     .map(([key, group]) => {
       const entries = group.files;
       entries.sort((left, right) => left.number - right.number || left.relativePath.localeCompare(right.relativePath, "ko", { numeric: true }));
+      const roleTotals = new Map<number, number>();
+      for (const entry of entries) {
+        roleTotals.set(entry.number, (roleTotals.get(entry.number) ?? 0) + 1);
+      }
       const roleCounts = new Map<number, number>();
       const uniqueEntries = entries.map((entry) => {
         const count = (roleCounts.get(entry.number) ?? 0) + 1;
         roleCounts.set(entry.number, count);
         const [code, label] = entry.category.split(" · ");
-        return { ...entry, category: `${code}${count === 1 ? "" : `-${count}`} · ${label}` };
+        const groupedCode = (roleTotals.get(entry.number) ?? 0) > 1 ? `${code}-${count}` : code;
+        return { ...entry, category: `${groupedCode} · ${label}` };
       });
       const hasModelReference = entries.some((entry) => entry.number === 1);
       const tooManyImages = entries.length > HORIZON_MAX_IMAGES;

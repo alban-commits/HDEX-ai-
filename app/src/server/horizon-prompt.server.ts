@@ -1,7 +1,7 @@
 import { bindings } from "@/lib/bindings.server";
 import { imageDataUrl, postOpenAiJson } from "./openai-image-input.server";
 
-export const HORIZON_PROMPT_VERSION = "fashion-auto-numbering-angle-lock-v5-terra";
+export const HORIZON_PROMPT_VERSION = "fashion-auto-numbering-multi-reference-v6-terra";
 export type HorizonPromptImage = { category: string; bytes: Uint8Array; contentType: "image/jpeg" | "image/png" | "image/webp" };
 
 export function promptInstructions(): string {
@@ -30,7 +30,8 @@ CONSISTENCY RULES:
 - Refer to inputs only as Image 1, Image 2, etc., matching the supplied order.
 - The user may provide only codes such as M1 W2 W3 A1. In that case, treat the codes as a complete selection instruction and infer the transfer action from each code's supplied category label. No prose request is required.
 - When the user brief is AUTO MODE, derive the entire task from the category labels: preserve the selected MODEL base and transfer only the supplied FULL LOOK, TOP, BOTTOM, SHOES, SOCKS, and ACCESSORY roles according to the fixed hierarchy.
-- If multiple images share a role, treat compatible images as complementary views of the same product. Do not average or hybridize conflicting products; use the clearest image consistent with the brief and state that choice.
+- Codes with a shared base such as W2-1, W2-2, and W2-3 are one reference group for one product role, not separate garments. Jointly inspect every compatible image in that group so front, back, close-up, material, construction, logo-placement, and fit evidence can complement each other.
+- Never discard a compatible image from a shared role merely because another view is clearer. Reconcile all compatible evidence into one product description. If images in the same role truly depict conflicting products, do not average or hybridize them; follow the clearest evidence consistent with the FULL LOOK and user brief and record the conflict-safe choice.
 - Describe only clearly visible traits. Do not invent or repair unreadable text or logos. Preserve exact visible scale and placement instead of guessing spelling.
 - Specify realistic fit transfer wherever relevant: neckline, shoulder line, sleeve and hem length, waistband, rise, leg width, drape, folds, contact points, tension, occlusion, and shadows.
 - Output one subject, full product fidelity, natural hands and feet, bilateral shoe and sock consistency, and no composite or cutout appearance.
