@@ -12,7 +12,7 @@ import { downloadMedia } from "@/lib/download-media";
 import { HorizonDirectoryScanError, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchResults, scanHorizonDirectory, supportsHorizonDirectoryPicker, type HorizonDirectoryHandle, type HorizonDirectoryPermission } from "@/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY as HISTORY_QUERY, syncHorizonHistory } from "@/lib/horizon-history";
 import { composeHorizonPrompt, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "@/lib/horizon.browser";
-import { HORIZON_MAX_FOLDER_FILES, HORIZON_MAX_IMAGES, HORIZON_RATIOS, HORIZON_SLOTS, HORIZON_VIEWS, boundedHorizonFolderFiles, claimHorizonImageReservation, horizonBatchProgress, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus, type HorizonBatchDownload, type HorizonBatchJob, type HorizonBatchStatus, type HorizonEngine, type HorizonImage, type HorizonView } from "@/lib/horizon";
+import { HORIZON_MAX_FOLDER_FILES, HORIZON_MAX_IMAGES, HORIZON_RATIOS, HORIZON_SLOTS, HORIZON_VIEWS, HorizonBatchStepError, boundedHorizonFolderFiles, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus, type HorizonBatchDownload, type HorizonBatchFailureStage, type HorizonBatchJob, type HorizonBatchStatus, type HorizonEngine, type HorizonImage, type HorizonView } from "@/lib/horizon";
 import { disconnectHiggsfieldOAuth, GUEST_SCOPE_KEY, getReconnectSignInUrl, getSignInUrl, PRESET_JOBS, releaseLocalUpload, subscribeHiggsfieldReconnect } from "@/lib/fnf.browser";
 import "./horizon-workspace.css";
 
@@ -361,37 +361,46 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
     try {
       await runHorizonBatchSequence(batch, async (current) => {
         setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "prompting" } : item));
-        await withHorizonUploadedAssets(current.files.map((entry) => entry.file), async (assets) => {
-          const uploaded: StoredImage[] = current.files.map((entry, index) => { const asset = assets[index]!; return { id: asset.ref?.id ?? crypto.randomUUID(), slotId: entry.slotId, code: entry.category.split(" · ")[0]!, category: entry.category, selected: true, name: entry.file.name, asset }; });
-          const promptResult = await composeHorizonPrompt({ brief: "", ratio: batchSettings.ratio, targetView: "auto", images: uploaded.map((image) => ({ mediaId: image.asset.ref?.id ?? "", category: image.category })) });
-          if (!promptResult.ok) throw new Error(promptResult.message);
-          setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "generating" } : item));
-          const submitted = await jobClient.submit(buildGenerationInput(batchSettings.engine, promptResult.prompt, batchSettings.ratio, batchSettings.quantity, uploaded));
-          const done = await jobClient.wait(submitted.generations);
-          await syncHorizonHistory(queryClient, done, scopeKey);
-          setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "saving" } : item));
-          const outcome = resolveHorizonBatchOutcome(done, batchSettings.engine, current.name, batchSettings.quantity);
-          let saved = { savedFiles: [] as string[], failureCount: 0 };
-          if (batchDirectory && batchDirectoryPermission === "granted" && outcome.results.length) {
-            try {
-              saved = await saveHorizonBatchResults({ root: batchDirectory, results: outcome.results });
-            } catch {
-              saved = { savedFiles: [], failureCount: outcome.results.length };
+        let stage: HorizonBatchFailureStage = "uploading";
+        try {
+          await withHorizonUploadedAssets(current.files.map((entry) => entry.file), async (assets) => {
+            const uploaded: StoredImage[] = current.files.map((entry, index) => { const asset = assets[index]!; return { id: asset.ref?.id ?? crypto.randomUUID(), slotId: entry.slotId, code: entry.category.split(" · ")[0]!, category: entry.category, selected: true, name: entry.file.name, asset }; });
+            stage = "prompting";
+            const promptResult = await composeHorizonPrompt({ brief: "", ratio: batchSettings.ratio, targetView: "auto", images: uploaded.map((image) => ({ mediaId: image.asset.ref?.id ?? "", category: image.category })) });
+            if (!promptResult.ok) throw new HorizonBatchStepError("prompting", promptResult.message);
+            stage = "generating";
+            setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "generating" } : item));
+            const submitted = await jobClient.submit(buildGenerationInput(batchSettings.engine, promptResult.prompt, batchSettings.ratio, batchSettings.quantity, uploaded));
+            const done = await jobClient.wait(submitted.generations);
+            await syncHorizonHistory(queryClient, done, scopeKey);
+            stage = "saving";
+            setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "saving" } : item));
+            const outcome = resolveHorizonBatchOutcome(done, batchSettings.engine, current.name, batchSettings.quantity);
+            let saved = { savedFiles: [] as string[], failureCount: 0 };
+            if (batchDirectory && batchDirectoryPermission === "granted" && outcome.results.length) {
+              try {
+                saved = await saveHorizonBatchResults({ root: batchDirectory, results: outcome.results });
+              } catch {
+                saved = { savedFiles: [], failureCount: outcome.results.length };
+              }
             }
-          }
-          setBatch((items) => items.map((item) => item.key === current.key ? {
-            ...item,
-            status: outcome.successCount > 0 ? "completed" : "failed",
-            ...outcome,
-            savedFiles: saved.savedFiles,
-            saveFailureCount: saved.failureCount,
-            message: outcome.successCount > 0
-              ? `${outcome.successCount}장 성공${outcome.failureCount ? ` · ${outcome.failureCount}장 생성 실패` : ""}${saved.savedFiles.length ? ` · 완성본 ${saved.savedFiles.length}장 저장` : ""}${saved.failureCount ? ` · ${saved.failureCount}장 저장 실패` : ""}`
-              : "완료된 이미지 결과가 없습니다.",
-          } : item));
-        });
-      }, (current) => {
-        setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "failed", message: "작업을 완료하지 못했습니다." } : item));
+            setBatch((items) => items.map((item) => item.key === current.key ? {
+              ...item,
+              status: outcome.successCount > 0 ? "completed" : "failed",
+              ...outcome,
+              savedFiles: saved.savedFiles,
+              saveFailureCount: saved.failureCount,
+              message: outcome.successCount > 0
+                ? `${outcome.successCount}장 성공${outcome.failureCount ? ` · ${outcome.failureCount}장 생성 실패` : ""}${saved.savedFiles.length ? ` · 완성본 ${saved.savedFiles.length}장 저장` : ""}${saved.failureCount ? ` · ${saved.failureCount}장 저장 실패` : ""}`
+                : "완료된 이미지 결과가 없습니다.",
+            } : item));
+          });
+        } catch (error) {
+          if (error instanceof HorizonBatchStepError) throw error;
+          throw new HorizonBatchStepError(stage, horizonBatchStageFailureMessage(stage));
+        }
+      }, (current, error) => {
+        setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "failed", message: horizonBatchFailureMessage(error) } : item));
       });
     } finally {
       setBatch((items) => items.map((item) => {

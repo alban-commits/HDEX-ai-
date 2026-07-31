@@ -8,13 +8,13 @@ import { createJobClient, type Generation, type ListResult } from "@higgsfield/f
 import { nanoBanana2 } from "@higgsfield/fnf/jobs";
 import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
-import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, claimHorizonImageReservation, horizonBatchProgress, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
+import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
 import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
 import { generationToGalleryItem } from "../src/lib/higgsfield-generation-results";
 import { disconnectHiggsfieldOAuth } from "../src/lib/fnf.browser";
-import { buildCodexPrompt, compilePrompt, HORIZON_PROMPT_VERSION, promptSchema, referenceGuard } from "../src/server/horizon-prompt.server";
+import { buildCodexPrompt, compilePrompt, composeHorizonPrompt, HORIZON_OPENAI_TIMEOUT_MS, HORIZON_PROMPT_IMAGE_MAX_EDGE, HORIZON_PROMPT_VERSION, prepareHorizonPromptImages, promptSchema, referenceGuard } from "../src/server/horizon-prompt.server";
 import { clearHiggsfieldRuntime, getHiggsfieldCapabilityRecord, inspectHiggsfieldCapabilities, inspectHiggsfieldProvider } from "../src/server/higgsfield-mcp.server";
 import { clearGenerationRuntime, createHiggsfieldGeneration, getHiggsfieldGeneration, listHiggsfieldGenerations } from "../src/server/higgsfield-generation-adapter.server";
 import { uploadHiggsfieldImage } from "../src/server/higgsfield-media.server";
@@ -217,7 +217,7 @@ describe("Horizon selection and folder contracts", () => {
 
   test("continues after one runnable batch item fails and settles interrupted work", async () => {
     const processed: string[] = [];
-    const failed: string[] = [];
+    const failed: Array<{ key: string; message: string }> = [];
     const jobs = [
       { key: "first", ready: true, status: "queued" as const },
       { key: "second", ready: true, status: "queued" as const },
@@ -225,10 +225,15 @@ describe("Horizon selection and folder contracts", () => {
     ];
     await runHorizonBatchSequence(jobs, async (job) => {
       processed.push(job.key);
-      if (job.key === "first") throw new Error("mock create failure");
-    }, (job) => failed.push(job.key));
+      if (job.key === "first") throw new HorizonBatchStepError("prompting", "GPT 이미지 분석 시간이 초과됐습니다. 같은 작업을 다시 시도해 주세요.");
+    }, (job, error) => failed.push({ key: job.key, message: horizonBatchFailureMessage(error) }));
     expect(processed).toEqual(["first", "second"]);
-    expect(failed).toEqual(["first"]);
+    expect(failed).toEqual([{
+      key: "first",
+      message: "GPT 이미지 분석 시간이 초과됐습니다. 같은 작업을 다시 시도해 주세요.",
+    }]);
+    expect(horizonBatchStageFailureMessage("uploading")).toBe("참조 이미지 업로드에 실패했습니다.");
+    expect(horizonBatchStageFailureMessage("generating")).toBe("이미지 생성 요청 또는 결과 처리에 실패했습니다.");
     expect(jobs.map((job) => settleHorizonBatchStatus(job.status, job.ready))).toEqual(["failed", "failed", "queued"]);
   });
 
@@ -466,6 +471,8 @@ describe("Horizon browser mutation boundaries", () => {
 describe("Horizon prompt contract", () => {
   test("preserves the V6 schema, hierarchy, grouped references, and golden compiled sections", () => {
     expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v6-terra");
+    expect(HORIZON_OPENAI_TIMEOUT_MS).toBe(180_000);
+    expect(HORIZON_PROMPT_IMAGE_MAX_EDGE).toBe(2_048);
     expect(promptSchema().required).toHaveLength(16);
     const images = [{category:"M1 · 모델 정면"},{category:"W1 · 전신 착장"},{category:"A1 · 신발"}];
     const guard = referenceGuard(images);
@@ -484,6 +491,43 @@ describe("Horizon prompt contract", () => {
     expect(groupedPrompt).toContain("W2-1, W2-2, and W2-3 are one reference group");
     expect(groupedPrompt).toContain("2. W2-1 · 상의 디테일");
     expect(groupedPrompt).toContain("3. W2-2 · 상의 디테일");
+  });
+
+  test("bounds prompt-analysis images and reports a dedicated GPT timeout", async () => {
+    const original = new Uint8Array(await sharp({
+      create: { width: 3_000, height: 1_000, channels: 4, background: "#00ff0080" },
+    }).png().toBuffer());
+    const prepared = await prepareHorizonPromptImages([{
+      category: "W2-1 · 상의 디테일",
+      bytes: original,
+      contentType: "image/png",
+    }]);
+    const metadata = await sharp(prepared[0]!.bytes).metadata();
+    expect(prepared[0]!.contentType).toBe("image/jpeg");
+    expect(metadata.width).toBe(2_048);
+    expect(metadata.height).toBeLessThanOrEqual(HORIZON_PROMPT_IMAGE_MAX_EDGE);
+
+    let calls = 0;
+    const result = await composeHorizonPrompt({
+      brief: "",
+      ratio: "2:3",
+      targetView: "auto",
+      images: [{ category: "M1 · 모델 기준", bytes: original, contentType: "image/png" }],
+      apiKey: "company-openai-secret",
+      timeoutMs: 5,
+      fetchImpl: async (_input, init) => {
+        calls += 1;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: "openai_timeout",
+      message: "GPT 이미지 분석 시간이 초과됐습니다. 같은 작업을 다시 시도해 주세요.",
+    });
+    expect(calls).toBe(1);
   });
 
   test("rejects declared and actual bodies above 80 MiB before OpenAI", async () => {

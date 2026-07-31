@@ -8,6 +8,10 @@ const MAX_OPENAI_RESPONSE_BYTES = 1024 * 1024;
 const OPENAI_TIMEOUT_MS = 60_000;
 
 type ImageContentType = "image/jpeg" | "image/png" | "image/webp";
+export type OpenAiPostFailure = "timeout" | "transport" | "http" | "invalid_response";
+export type OpenAiPostResult =
+  | { ok: true; payload: unknown }
+  | { ok: false; payload: unknown; failure: OpenAiPostFailure };
 
 function mimeForPath(path: string): ImageContentType {
   const extension = extname(path).toLowerCase();
@@ -85,9 +89,10 @@ export async function postOpenAiJson(input: {
   apiKey: string;
   body: unknown;
   fetchImpl?: typeof fetch;
-}): Promise<{ ok: boolean; payload: unknown }> {
+  timeoutMs?: number;
+}): Promise<OpenAiPostResult> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? OPENAI_TIMEOUT_MS);
   try {
     const response = await (input.fetchImpl ?? fetch)("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -98,9 +103,21 @@ export async function postOpenAiJson(input: {
       body: JSON.stringify(input.body),
       signal: controller.signal,
     });
-    return { ok: response.ok, payload: await readOpenAiJson(response) };
+    let payload: unknown;
+    try {
+      payload = await readOpenAiJson(response);
+    } catch {
+      return { ok: false, payload: null, failure: "invalid_response" };
+    }
+    return response.ok
+      ? { ok: true, payload }
+      : { ok: false, payload, failure: "http" };
   } catch {
-    return { ok: false, payload: null };
+    return {
+      ok: false,
+      payload: null,
+      failure: controller.signal.aborted ? "timeout" : "transport",
+    };
   } finally {
     clearTimeout(timer);
   }

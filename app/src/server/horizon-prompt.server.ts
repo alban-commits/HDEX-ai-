@@ -1,8 +1,37 @@
 import { bindings } from "@/lib/bindings.server";
+import sharp from "sharp";
+import { MAX_IMAGE_PIXELS } from "./image-validation.server";
 import { imageDataUrl, postOpenAiJson } from "./openai-image-input.server";
 
 export const HORIZON_PROMPT_VERSION = "fashion-auto-numbering-multi-reference-v6-terra";
+export const HORIZON_OPENAI_TIMEOUT_MS = 180_000;
+export const HORIZON_PROMPT_IMAGE_MAX_EDGE = 2_048;
 export type HorizonPromptImage = { category: string; bytes: Uint8Array; contentType: "image/jpeg" | "image/png" | "image/webp" };
+
+export async function prepareHorizonPromptImages(
+  images: readonly HorizonPromptImage[],
+): Promise<HorizonPromptImage[]> {
+  const prepared: HorizonPromptImage[] = [];
+  for (const image of images) {
+    const bytes = new Uint8Array(await sharp(image.bytes, {
+      failOn: "error",
+      limitInputPixels: MAX_IMAGE_PIXELS,
+      pages: 1,
+    })
+      .rotate()
+      .resize({
+        width: HORIZON_PROMPT_IMAGE_MAX_EDGE,
+        height: HORIZON_PROMPT_IMAGE_MAX_EDGE,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .flatten({ background: "#ffffff" })
+      .jpeg({ quality: 90, chromaSubsampling: "4:4:4" })
+      .toBuffer());
+    prepared.push({ category: image.category, bytes, contentType: "image/jpeg" });
+  }
+  return prepared;
+}
 
 export function promptInstructions(): string {
   return `You are a deterministic multi-reference fashion image prompt compiler. Convert a rough Korean or English request and labeled images into one precise wardrobe/product-transfer specification for Higgsfield image generation.
@@ -83,11 +112,15 @@ function extractOutputText(payload: unknown): string {
   return "";
 }
 
-export async function composeHorizonPrompt(input: { brief: string; ratio: string; targetView: string; images: HorizonPromptImage[]; fetchImpl?: typeof fetch; apiKey?: string }) {
+export async function composeHorizonPrompt(input: { brief: string; ratio: string; targetView: string; images: HorizonPromptImage[]; fetchImpl?: typeof fetch; apiKey?: string; timeoutMs?: number }) {
   const apiKey = input.apiKey ?? bindings().OPENAI_API_KEY;
   if (!apiKey) return { ok: false as const, code: "missing_openai_api_key", message: "회사 OpenAI 서버 설정을 확인해 주세요." };
   const brief = input.brief.trim() || "AUTO MODE: infer the intended wardrobe and wearable transfer exclusively from the selected labeled reference categories. Replace every supplied dedicated product role and preserve every missing role from the immutable model base.";
-  const response = await postOpenAiJson({ apiKey, fetchImpl: input.fetchImpl, body: { model: "gpt-5.6-terra", input: [{ role: "user", content: [{ type: "input_text", text: buildCodexPrompt(brief,input.ratio,input.targetView,input.images) }, ...input.images.map((image)=>({ type:"input_image" as const, image_url:imageDataUrl(image.bytes,image.contentType), detail:"high" as const }))] }], text: { format: { type: "json_schema", name: "horizon_fashion_prompt", strict: true, schema: promptSchema() } } } });
-  if (!response.ok) return { ok: false as const, code: "openai_error", message: "GPT 명령어 작성 요청에 실패했습니다." };
+  const promptImages = await prepareHorizonPromptImages(input.images);
+  const response = await postOpenAiJson({ apiKey, fetchImpl: input.fetchImpl, timeoutMs: input.timeoutMs ?? HORIZON_OPENAI_TIMEOUT_MS, body: { model: "gpt-5.6-terra", input: [{ role: "user", content: [{ type: "input_text", text: buildCodexPrompt(brief,input.ratio,input.targetView,input.images) }, ...promptImages.map((image)=>({ type:"input_image" as const, image_url:imageDataUrl(image.bytes,image.contentType), detail:"high" as const }))] }], text: { format: { type: "json_schema", name: "horizon_fashion_prompt", strict: true, schema: promptSchema() } } } });
+  if (!response.ok) {
+    if (response.failure === "timeout") return { ok: false as const, code: "openai_timeout", message: "GPT 이미지 분석 시간이 초과됐습니다. 같은 작업을 다시 시도해 주세요." };
+    return { ok: false as const, code: "openai_error", message: "GPT 명령어 작성 요청에 실패했습니다." };
+  }
   try { const spec = JSON.parse(extractOutputText(response.payload)) as Record<string,unknown>; return { ok:true as const, prompt:compilePrompt(spec,input.ratio,input.images), spec, model:"gpt-5.6-terra", promptVersion:HORIZON_PROMPT_VERSION }; } catch { return { ok:false as const, code:"invalid_profile", message:"GPT가 올바른 JSON을 반환하지 않았습니다." }; }
 }

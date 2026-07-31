@@ -12,6 +12,29 @@ export type HorizonRole = "model" | "wardrobe" | "accessory";
 export type HorizonEngine = "gpt-2k" | "nano-2k" | "nano-4k";
 export type HorizonBatchDownload = { url: string; filename: string };
 export type HorizonBatchStatus = "queued" | "prompting" | "generating" | "saving" | "completed" | "failed";
+export type HorizonBatchFailureStage = "uploading" | "prompting" | "generating" | "saving";
+
+export class HorizonBatchStepError extends Error {
+  constructor(
+    public readonly stage: HorizonBatchFailureStage,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HorizonBatchStepError";
+  }
+}
+
+export function horizonBatchFailureMessage(error: unknown): string {
+  if (error instanceof HorizonBatchStepError) return error.message;
+  return "작업을 완료하지 못했습니다.";
+}
+
+export function horizonBatchStageFailureMessage(stage: HorizonBatchFailureStage): string {
+  if (stage === "uploading") return "참조 이미지 업로드에 실패했습니다.";
+  if (stage === "prompting") return "GPT 명령어 작성에 실패했습니다.";
+  if (stage === "generating") return "이미지 생성 요청 또는 결과 처리에 실패했습니다.";
+  return "완성 이미지 저장에 실패했습니다.";
+}
 
 export function settleHorizonBatchStatus(status: HorizonBatchStatus, ready: boolean): HorizonBatchStatus {
   return ready && status !== "completed" && status !== "failed" ? "failed" : status;
@@ -20,14 +43,14 @@ export function settleHorizonBatchStatus(status: HorizonBatchStatus, ready: bool
 export async function runHorizonBatchSequence<T extends { ready: boolean }>(
   items: readonly T[],
   process: (item: T) => Promise<void>,
-  onFailure: (item: T) => void,
+  onFailure: (item: T, error: unknown) => void,
 ): Promise<void> {
   for (const item of items) {
     if (!item.ready) continue;
     try {
       await process(item);
-    } catch {
-      onFailure(item);
+    } catch (error) {
+      onFailure(item, error);
     }
   }
 }
