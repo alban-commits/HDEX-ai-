@@ -12,7 +12,7 @@ import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, Hori
 import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { HORIZON_UPLOAD_MAX_EDGE, HORIZON_UPLOAD_TARGET_BYTES, HORIZON_UPLOAD_TARGET_PIXELS, horizonOptimizedDimensions, optimizeHorizonUploadFile, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
-import { horizonRestoreCanvasPoint, horizonRestoreFaceBounds, horizonRestoreFilename } from "../src/lib/horizon-restore.browser";
+import { horizonLayeredPsdFilename } from "../src/lib/horizon-restore.browser";
 import { generationToGalleryItem } from "../src/lib/higgsfield-generation-results";
 import { disconnectHiggsfieldOAuth } from "../src/lib/fnf.browser";
 import { buildCodexPrompt, compilePrompt, composeHorizonPrompt, HORIZON_OPENAI_TIMEOUT_MS, HORIZON_PROMPT_IMAGE_MAX_EDGE, HORIZON_PROMPT_VERSION, prepareHorizonPromptImages, promptSchema, referenceGuard } from "../src/server/horizon-prompt.server";
@@ -61,22 +61,8 @@ function directoryHandle(
 }
 
 describe("Horizon selection and folder contracts", () => {
-  test("keeps restore mask coordinates and Photoshop filenames bounded", () => {
-    expect(horizonRestoreFaceBounds(2000, 3000)).toEqual({
-      x: 700,
-      y: 45,
-      width: 600,
-      height: 690,
-    });
-    expect(horizonRestoreCanvasPoint(150, 250, { left: 100, top: 200, width: 400, height: 600 }, 2000, 3000)).toEqual({
-      x: 250,
-      y: 250,
-    });
-    expect(horizonRestoreCanvasPoint(-10, 900, { left: 100, top: 200, width: 400, height: 600 }, 2000, 3000)).toEqual({
-      x: 0,
-      y: 3000,
-    });
-    expect(horizonRestoreFilename('look:01/정면?.png', "psd")).toBe("look-01-정면--원본복원.psd");
+  test("keeps layered Photoshop filenames bounded and filesystem-safe", () => {
+    expect(horizonLayeredPsdFilename('look:01/정면?.png')).toBe("look-01-정면--원본+생성본.psd");
   });
 
   test("does not show a connected or disconnected state while OAuth scope is loading", () => {
