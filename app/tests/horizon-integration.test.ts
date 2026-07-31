@@ -11,7 +11,7 @@ import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, hand
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
 import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
-import { runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
+import { HORIZON_UPLOAD_MAX_EDGE, HORIZON_UPLOAD_TARGET_BYTES, HORIZON_UPLOAD_TARGET_PIXELS, horizonOptimizedDimensions, optimizeHorizonUploadFile, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
 import { generationToGalleryItem } from "../src/lib/higgsfield-generation-results";
 import { disconnectHiggsfieldOAuth } from "../src/lib/fnf.browser";
 import { buildCodexPrompt, compilePrompt, composeHorizonPrompt, HORIZON_OPENAI_TIMEOUT_MS, HORIZON_PROMPT_IMAGE_MAX_EDGE, HORIZON_PROMPT_VERSION, prepareHorizonPromptImages, promptSchema, referenceGuard } from "../src/server/horizon-prompt.server";
@@ -400,6 +400,48 @@ describe("Horizon browser directory boundary", () => {
 });
 
 describe("Horizon browser mutation boundaries", () => {
+  test("automatically bounds oversized Horizon references before upload", async () => {
+    expect(HORIZON_UPLOAD_TARGET_BYTES).toBe(18 * 1024 * 1024);
+    expect(HORIZON_UPLOAD_TARGET_PIXELS).toBe(30_000_000);
+    expect(HORIZON_UPLOAD_MAX_EDGE).toBe(6_000);
+    expect(horizonOptimizedDimensions(8_160, 6_120)).toEqual({ width: 6_000, height: 4_500 });
+
+    let closed = false;
+    const encodedDimensions: Array<{ width: number; height: number; quality: number }> = [];
+    const original = new File([new Uint8Array(16)], "4-2.png", {
+      type: "image/png",
+      lastModified: 123,
+    });
+    const optimized = await optimizeHorizonUploadFile(original, {
+      decode: async () => ({
+        width: 8_160,
+        height: 6_120,
+        close: () => { closed = true; },
+      }),
+      encodeJpeg: async (_image, width, height, quality) => {
+        encodedDimensions.push({ width, height, quality });
+        return new Blob([new Uint8Array(1_024)], { type: "image/jpeg" });
+      },
+    });
+    expect(optimized).not.toBe(original);
+    expect(optimized.name).toBe("4-2.jpg");
+    expect(optimized.type).toBe("image/jpeg");
+    expect(optimized.lastModified).toBe(123);
+    expect(optimized.size).toBe(1_024);
+    expect(encodedDimensions).toEqual([{ width: 6_000, height: 4_500, quality: 0.92 }]);
+    expect(closed).toBe(true);
+
+    let uploadedFile: File | null = null;
+    await uploadHorizonAssets([original], {
+      optimize: async () => optimized,
+      upload: async (entry) => {
+        uploadedFile = entry;
+        return { name: entry.name, type: entry.type, src: "blob:preview", ref: { id: "optimized-upload", type: "media_input" } };
+      },
+    });
+    expect(uploadedFile).toBe(optimized);
+  });
+
   test("uses DELETE and accepts only the exact successful disconnect envelope", async () => {
     const originalFetch = globalThis.fetch;
     let responseBody: unknown = { connected: false, transport: "mcp_oauth" };
