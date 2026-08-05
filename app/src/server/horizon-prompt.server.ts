@@ -3,7 +3,7 @@ import sharp from "sharp";
 import { MAX_IMAGE_PIXELS } from "./image-validation.server";
 import { imageDataUrl, postOpenAiJson } from "./openai-image-input.server";
 
-export const HORIZON_PROMPT_VERSION = "fashion-auto-numbering-multi-reference-v9-terra";
+export const HORIZON_PROMPT_VERSION = "fashion-auto-numbering-multi-reference-v10-terra";
 export const HORIZON_OPENAI_TIMEOUT_MS = 180_000;
 export const HORIZON_PROMPT_IMAGE_MAX_EDGE = 2_048;
 export type HorizonPromptImage = { category: string; bytes: Uint8Array; contentType: "image/jpeg" | "image/png" | "image/webp" };
@@ -67,6 +67,7 @@ CONSISTENCY RULES:
 - Never discard a compatible image from a shared role merely because another view is clearer. Reconcile all compatible evidence into one product description. If images in the same role truly depict conflicting products, do not average or hybridize them; follow the clearest evidence consistent with the FULL LOOK and user brief and record the conflict-safe choice.
 - Describe only clearly visible traits. Do not invent or repair unreadable text or logos. Preserve exact visible scale and placement instead of guessing spelling.
 - Specify realistic fit transfer wherever relevant: neckline, shoulder line, sleeve and hem length, waistband, rise, leg width, drape, folds, contact points, tension, occlusion, and shadows.
+- Preserve the exact lower-garment-to-footwear relationship visible in FULL LOOK and BOTTOM references. If long or wide trousers visibly extend over, stack on, or cover the footwear, reproduce that full length and drape with the trouser hem in front of the shoe upper; never shorten, taper, cuff, tuck, or stop the hem above the shoe merely to reveal footwear. If the reference instead shows shorts, cropped pants, or exposed footwear, preserve that different relationship exactly. Dedicated footwear changes the shoe product only and never overrides trouser length or trouser-over-shoe occlusion.
 - Output one subject, full product fidelity, natural hands and feet, bilateral shoe and sock consistency, and no composite or cutout appearance.
 - Return only the supplied JSON schema. Use concise professional English, empty strings for absent optional items, and no alternatives or commentary.`;
 }
@@ -122,12 +123,12 @@ export function compilePrompt(s: Record<string, unknown>, ratio: string, images:
       ? `No dedicated TOP reference is supplied. Derive the upper garment completely from ${fullLookSources} and replace the original base upper garment; do not preserve, retain, or restyle the original top.`
       : "";
   const bottomTransfer = guard.dedicatedBottom
-    ? `Analyzed bottom details: ${String(s.bottom_transfer ?? "").trim() || "derive the exact visible bottom product directly from the source image"}. MANDATORY: Replace the original base lower garment with the BOTTOM product shown in ${bottomSources}. Its product color, construction, fabric, fit, rise, length, pockets, graphics, and logo placement override FULL LOOK.`
+    ? `Analyzed bottom details: ${String(s.bottom_transfer ?? "").trim() || "derive the exact visible bottom product directly from the source image"}. MANDATORY: Replace the original base lower garment with the BOTTOM product shown in ${bottomSources}. Its product color, construction, fabric, fit, rise, exact hem length, leg width, pockets, graphics, logo placement, and visible relationship to the footwear override FULL LOOK. When the referenced trousers are long or wide enough to cover or stack on the shoes, keep the trouser hem in front of and over the shoe upper instead of stopping at the shoe collar.`
     : guard.fullLook
       ? `No dedicated BOTTOM reference is supplied. Derive the lower garment completely from ${fullLookSources} and replace the original base lower garment; do not preserve, retain, or restyle the original bottom.`
       : "";
   const footwearTransfer = guard.shoes
-    ? `Analyzed footwear details: ${String(s.footwear_transfer ?? "").trim() || "derive the exact shoes directly from the source image"}. Replace only the original shoes with the shoes shown in ${shoesSources}.`
+    ? `Analyzed footwear details: ${String(s.footwear_transfer ?? "").trim() || "derive the exact shoes directly from the source image"}. Replace only the original shoes with the shoes shown in ${shoesSources}. Footwear must remain behind or underneath any referenced long trouser hem; never shorten or lift trousers to expose the entire shoe.`
     : "";
   const socksTransfer = guard.socks
     ? `Analyzed sock details: ${String(s.socks_transfer ?? "").trim() || "derive the exact socks directly from the source image"}. Replace only the original socks or bare-ankle state with the socks shown in ${socksSources}.`
@@ -155,7 +156,7 @@ export function compilePrompt(s: Record<string, unknown>, ratio: string, images:
     ["ACCESSORY TRANSFER", accessoriesTransfer],
     ["AUTHORIZED REPLACEMENTS", guard.authorized],
     ["UNREFERENCED ITEMS — PRESERVE FROM BASE", guard.preserve],
-    ["PHYSICAL FIT & MATERIAL REALISM", `${String(s.fit_material_realism ?? "").trim()} Render physically accurate garment construction, fabric drape, folds, tension, contact points, occlusion, perspective, and shadows on the unchanged MODEL body and pose.`.trim()],
+    ["PHYSICAL FIT & MATERIAL REALISM", `${String(s.fit_material_realism ?? "").trim()} Render physically accurate garment construction, fabric drape, folds, tension, contact points, occlusion, perspective, and shadows on the unchanged MODEL body and pose. Match the reference hem-to-footwear geometry exactly: long trousers may stack over and obscure shoe uppers, while shorts or cropped trousers must retain their referenced exposure.`.trim()],
     ["PRESERVE EXACTLY", "MODEL identity, face, hair, skin, anatomy, body proportions, pose, camera, crop, background, lighting, and shadows only; plus only wearable roles explicitly listed as unreferenced above."],
     ["DO NOT ADD, CHANGE, OR IMPORT", "Do not import any reference person, body, pose, camera, crop, background, lighting, or unrelated item. Do not preserve any original base garment or wearable whose role is authorized for replacement. No extra people, duplicated products, text, watermark, interface, collage, or split image."],
     ["FINAL OUTPUT", `One centered subject only. ${ratio} aspect ratio. One continuous undivided photorealistic image. The result must be the MODEL photograph with every authorized product visibly replaced and no authorized original garment remaining. Product replacement has absolute priority over clothing preservation; only non-clothing MODEL attributes and explicitly unreferenced wearable roles remain unchanged.`],

@@ -10,7 +10,7 @@ import { nanoBanana2 } from "@higgsfield/fnf/jobs";
 import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
-import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
+import { HORIZON_COMPLETED_DIRECTORY_NAME, HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { HORIZON_UPLOAD_MAX_EDGE, HORIZON_UPLOAD_TARGET_BYTES, HORIZON_UPLOAD_TARGET_PIXELS, horizonOptimizedDimensions, optimizeHorizonUploadFile, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
 import { createHorizonLayeredPsdBytes, horizonLayeredPsdFilename } from "../src/lib/horizon-restore.browser";
@@ -377,9 +377,13 @@ describe("Horizon browser directory boundary", () => {
         };
       },
     } satisfies HorizonDirectoryHandle;
+    const outputRequests: Array<{ name: string; create?: boolean }> = [];
     const rootHandle = {
       ...directoryHandle("작업루트", []),
-      getDirectoryHandle: async () => output,
+      getDirectoryHandle: async (name, options) => {
+        outputRequests.push({ name, create: options?.create });
+        return output;
+      },
     } satisfies HorizonDirectoryHandle;
     const original = new Blob(["original"], { type: "image/png" });
     const requested: string[] = [];
@@ -411,6 +415,7 @@ describe("Horizon browser directory boundary", () => {
       failedResults: [],
     });
     expect(requested).toEqual(["/api/higgsfield/result/job-pair"]);
+    expect(outputRequests).toEqual([{ name: HORIZON_COMPLETED_DIRECTORY_NAME, create: true }]);
     expect([...written.keys()]).toEqual(["상품-A.png", "상품-A.psd"]);
   });
 
@@ -646,8 +651,8 @@ describe("Horizon browser mutation boundaries", () => {
 });
 
 describe("Horizon prompt contract", () => {
-  test("preserves the V9 schema, hierarchy, grouped references, and golden compiled sections", () => {
-    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v9-terra");
+  test("preserves the V10 schema, hierarchy, grouped references, and golden compiled sections", () => {
+    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v10-terra");
     expect(HORIZON_OPENAI_TIMEOUT_MS).toBe(180_000);
     expect(HORIZON_PROMPT_IMAGE_MAX_EDGE).toBe(2_048);
     expect(promptSchema().required).toHaveLength(16);
@@ -661,6 +666,8 @@ describe("Horizon prompt contract", () => {
     expect(prompt).toContain("MANDATORY: Use Image 2 as the FULL LOOK wardrobe target and replace both original base garments");
     expect(prompt).toContain("MANDATORY: Replace the original base upper garment with the TOP product shown in Image 3");
     expect(prompt).toContain("MANDATORY: Replace the original base lower garment with the BOTTOM product shown in Image 4");
+    expect(prompt).toContain("keep the trouser hem in front of and over the shoe upper instead of stopping at the shoe collar");
+    expect(prompt).toContain("Footwear must remain behind or underneath any referenced long trouser hem");
     expect(prompt).toContain("AUTHORIZED REPLACEMENTS: upper garment only; lower garment only; shoes only");
     expect(prompt).toContain("original base socks or bare-ankle state exactly");
     expect(prompt).toContain("FINAL OUTPUT: One centered subject only. 2:3 aspect ratio.");
@@ -719,6 +726,21 @@ describe("Horizon prompt contract", () => {
     expect(prompt).not.toContain("original black shorts");
     expect(prompt).toContain("The base MODEL controls no clothing where a wardrobe role is authorized");
     expect(prompt).toContain("Do not preserve any original base garment or wearable whose role is authorized for replacement");
+  });
+
+  test("matches referenced trouser length and shoe occlusion instead of forcing every shoe fully visible", () => {
+    const images = [{category:"M1 · 모델 후면"},{category:"W1 · 전신 착장"},{category:"W3 · 하의 디테일"},{category:"A1 · 신발"}];
+    const prompt = compilePrompt({
+      target_view: "back",
+      full_look_transfer: "long wide trousers stacking over the shoes",
+      bottom_transfer: "floor-length wide-leg trousers",
+      footwear_transfer: "black sneakers",
+      fit_material_realism: "Natural drape",
+    }, "2:3", images);
+    expect(prompt).toContain("exact hem length");
+    expect(prompt).toContain("trouser hem in front of and over the shoe upper");
+    expect(prompt).toContain("never shorten or lift trousers to expose the entire shoe");
+    expect(prompt).toContain("shorts or cropped trousers must retain their referenced exposure");
   });
 
   test("bounds prompt-analysis images and reports a dedicated GPT timeout", async () => {

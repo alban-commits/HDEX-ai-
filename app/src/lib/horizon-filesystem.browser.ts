@@ -2,6 +2,7 @@ import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, scanHorizonFolder, 
 import { createHorizonPngPsdArtifacts, type HorizonPngPsdArtifacts } from "./horizon-restore.browser";
 
 export type HorizonDirectoryPermission = "granted" | "denied" | "prompt";
+export const HORIZON_COMPLETED_DIRECTORY_NAME = "완성본";
 
 export type HorizonFileHandle = {
   kind: "file";
@@ -158,7 +159,7 @@ export async function scanHorizonDirectory(handle: HorizonDirectoryHandle): Prom
     if (depth > HORIZON_MAX_FOLDER_DEPTH || limitReached) return;
     for await (const entry of directory.values()) {
       if (entry.kind === "directory") {
-        if (entry.name.startsWith(".") || entry.name === "완성본") continue;
+        if (entry.name.startsWith(".") || entry.name === HORIZON_COMPLETED_DIRECTORY_NAME) continue;
         await visit(entry, [...segments, entry.name], depth + 1);
       } else {
         if (files.length >= HORIZON_MAX_FOLDER_FILES) { limitReached = true; break; }
@@ -253,7 +254,7 @@ export async function saveHorizonBatchResults(input: {
 }): Promise<{ savedFiles: string[]; failureCount: number }> {
   let output: HorizonDirectoryHandle;
   try {
-    output = await input.root.getDirectoryHandle("완성본", { create: true });
+    output = await input.root.getDirectoryHandle(HORIZON_COMPLETED_DIRECTORY_NAME, { create: true });
   } catch {
     return { savedFiles: [], failureCount: input.results.length };
   }
@@ -290,7 +291,7 @@ export async function saveHorizonBatchPngPsd(input: {
     try {
       const generated = await fetchResultBlob({ result, fetchResult, publicOrigin });
       const artifacts = await createArtifacts({ original: input.original, generated, filename: result.filename });
-      output ??= await input.root.getDirectoryHandle("완성본", { create: true });
+      output ??= await input.root.getDirectoryHandle(HORIZON_COMPLETED_DIRECTORY_NAME, { create: true });
       writtenForResult.push(await writeBlobFile(output, artifacts.pngFilename, artifacts.png));
       writtenForResult.push(await writeBlobFile(output, artifacts.psdFilename, artifacts.psd));
       savedFiles.push(...writtenForResult);
