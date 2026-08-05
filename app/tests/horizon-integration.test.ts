@@ -9,7 +9,7 @@ import { nanoBanana2 } from "@higgsfield/fnf/jobs";
 import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
-import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
+import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { HORIZON_UPLOAD_MAX_EDGE, HORIZON_UPLOAD_TARGET_BYTES, HORIZON_UPLOAD_TARGET_PIXELS, horizonOptimizedDimensions, optimizeHorizonUploadFile, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
 import { horizonLayeredPsdFilename } from "../src/lib/horizon-restore.browser";
@@ -62,7 +62,7 @@ function directoryHandle(
 
 describe("Horizon selection and folder contracts", () => {
   test("keeps layered Photoshop filenames bounded and filesystem-safe", () => {
-    expect(horizonLayeredPsdFilename('look:01/정면?.png')).toBe("look-01-정면--원본+생성본.psd");
+    expect(horizonLayeredPsdFilename('look:01/정면?.png')).toBe("look-01-정면-.psd");
   });
 
   test("does not show a connected or disconnected state while OAuth scope is loading", () => {
@@ -337,6 +337,96 @@ describe("Horizon browser directory boundary", () => {
     expect(saved).toEqual({ savedFiles: ["상품-A_3.jpg", "상품-B_01_2.webp"], failureCount: 0 });
     expect(requested).toEqual(["/api/higgsfield/result/job-safe-a", "/api/higgsfield/result/job-safe-b"]);
     expect([...written.keys()]).toEqual(["상품-A_3.jpg", "상품-B_01_2.webp"]);
+  });
+
+  test("writes one PNG and one two-layer PSD for every completed batch result", async () => {
+    const existing = new Set<string>();
+    const written = new Map<string, Blob>();
+    const output = {
+      ...directoryHandle("완성본", []),
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        if (!options?.create) {
+          if (existing.has(name)) return fileHandle(name);
+          throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+        }
+        existing.add(name);
+        return {
+          ...fileHandle(name),
+          createWritable: async () => ({
+            write: async (blob: Blob) => { written.set(name, blob); },
+            close: async () => undefined,
+          }),
+        };
+      },
+    } satisfies HorizonDirectoryHandle;
+    const rootHandle = {
+      ...directoryHandle("작업루트", []),
+      getDirectoryHandle: async () => output,
+    } satisfies HorizonDirectoryHandle;
+    const original = new Blob(["original"], { type: "image/png" });
+    const requested: string[] = [];
+    const saved = await saveHorizonBatchPngPsd({
+      root: rootHandle,
+      original,
+      results: [{ url: "/api/higgsfield/result/job-pair", filename: "상품-A.jpg" }],
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async (url) => {
+        requested.push(String(url));
+        return new Response(new Blob(["generated"], { type: "image/jpeg" }), { headers: { "content-type": "image/jpeg" } });
+      },
+      createArtifacts: async ({ original: receivedOriginal, generated, filename }) => {
+        expect(receivedOriginal).toBe(original);
+        expect(await generated.text()).toBe("generated");
+        expect(filename).toBe("상품-A.jpg");
+        return {
+          png: new Blob(["png"], { type: "image/png" }),
+          psd: new Blob(["psd"], { type: "image/vnd.adobe.photoshop" }),
+          pngFilename: "상품-A.png",
+          psdFilename: "상품-A.psd",
+        };
+      },
+    });
+    expect(saved).toEqual({
+      savedFiles: ["상품-A.png", "상품-A.psd"],
+      savedResultCount: 1,
+      failureCount: 0,
+      failedResults: [],
+    });
+    expect(requested).toEqual(["/api/higgsfield/result/job-pair"]);
+    expect([...written.keys()]).toEqual(["상품-A.png", "상품-A.psd"]);
+  });
+
+  test("removes a partial PNG when the matching PSD cannot be written", async () => {
+    const removed: string[] = [];
+    const output = {
+      ...directoryHandle("완성본", []),
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        if (!options?.create) throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+        if (name.endsWith(".psd")) throw Object.assign(new Error("denied"), { name: "NotAllowedError" });
+        return {
+          ...fileHandle(name),
+          createWritable: async () => ({ write: async () => undefined, close: async () => undefined }),
+        };
+      },
+      removeEntry: async (name: string) => { removed.push(name); },
+    } satisfies HorizonDirectoryHandle;
+    const rootHandle = { ...directoryHandle("작업루트", []), getDirectoryHandle: async () => output } satisfies HorizonDirectoryHandle;
+    const result = { url: "/api/higgsfield/result/job-partial", filename: "상품-A.png" };
+    const saved = await saveHorizonBatchPngPsd({
+      root: rootHandle,
+      original: new Blob(["original"], { type: "image/png" }),
+      results: [result],
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async () => new Response(new Blob(["generated"], { type: "image/png" }), { headers: { "content-type": "image/png" } }),
+      createArtifacts: async () => ({
+        png: new Blob(["png"], { type: "image/png" }),
+        psd: new Blob(["psd"], { type: "image/vnd.adobe.photoshop" }),
+        pngFilename: "상품-A.png",
+        psdFilename: "상품-A.psd",
+      }),
+    });
+    expect(saved).toEqual({ savedFiles: [], savedResultCount: 0, failureCount: 1, failedResults: [result] });
+    expect(removed).toEqual(["상품-A.png"]);
   });
 
   test("does not create an output file after permission or unknown lookup errors", async () => {

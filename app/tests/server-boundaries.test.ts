@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import sharp from "sharp";
 import { composeInfluencerProfile } from "../src/lib/profile.functions";
 import { BASE_PROFILE } from "../src/data/base-profile";
-import { downloadResultThroughTemporaryFile } from "../src/server/result-download.server";
+import { downloadResultThroughTemporaryFile, MAX_RESULT_BYTES, RESULT_DOWNLOAD_TIMEOUT_MS } from "../src/server/result-download.server";
 import { handleHiggsfieldUpload } from "../src/server/higgsfield-upload-route.server";
 import { handleOpenAiProfile } from "../src/server/openai-profile-route.server";
 import { getRuntimeReadiness, getTemporaryStorageConfig } from "../src/server/runtime-config.server";
@@ -171,6 +171,11 @@ describe("server OpenAI image input boundary", () => {
 });
 
 describe("temporary result download boundary", () => {
+  test("allows bounded large 4K image results for PNG and PSD export", () => {
+    expect(MAX_RESULT_BYTES).toBe(80 * 1024 * 1024);
+    expect(RESULT_DOWNLOAD_TIMEOUT_MS).toBe(120_000);
+  });
+
   test("returns browser bytes and removes every request-scoped temporary file in finally", async () => {
     const temporaryParent = await mkdtemp(join(tmpdir(), "hdex-result-test-parent-"));
     try {

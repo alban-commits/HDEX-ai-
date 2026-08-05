@@ -1,4 +1,5 @@
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, scanHorizonFolder, type HorizonBatchDownload, type HorizonBatchJob } from "./horizon";
+import { createHorizonPngPsdArtifacts, type HorizonPngPsdArtifacts } from "./horizon-restore.browser";
 
 export type HorizonDirectoryPermission = "granted" | "denied" | "prompt";
 
@@ -203,12 +204,11 @@ async function uniqueOutputFile(directory: HorizonDirectoryHandle, preferredName
   throw new Error("output_name_unavailable");
 }
 
-async function writeResultFile(input: {
-  directory: HorizonDirectoryHandle;
+async function fetchResultBlob(input: {
   result: HorizonBatchDownload;
   fetchResult: typeof fetch;
   publicOrigin: string;
-}): Promise<string> {
+}): Promise<Blob> {
   const resultUrl = new URL(input.result.url, input.publicOrigin);
   if (resultUrl.origin !== input.publicOrigin || !resultUrl.pathname.startsWith("/api/higgsfield/result/") || resultUrl.search || resultUrl.hash) {
     throw new Error("result_url_invalid");
@@ -217,7 +217,11 @@ async function writeResultFile(input: {
   if (!response.ok) throw new Error("result_download_failed");
   const blob = await response.blob();
   if (!blob.type.toLowerCase().startsWith("image/")) throw new Error("result_type_invalid");
-  const output = await uniqueOutputFile(input.directory, filenameForImageType(input.result.filename, blob.type));
+  return blob;
+}
+
+async function writeBlobFile(directory: HorizonDirectoryHandle, filename: string, blob: Blob): Promise<string> {
+  const output = await uniqueOutputFile(directory, filename);
   if (!output.handle.createWritable) throw new Error("directory_write_unsupported");
   const writable = await output.handle.createWritable();
   try {
@@ -226,9 +230,19 @@ async function writeResultFile(input: {
     return output.name;
   } catch {
     await writable.abort?.().catch(() => undefined);
-    await input.directory.removeEntry?.(output.name).catch(() => undefined);
+    await directory.removeEntry?.(output.name).catch(() => undefined);
     throw new Error("result_write_failed");
   }
+}
+
+async function writeResultFile(input: {
+  directory: HorizonDirectoryHandle;
+  result: HorizonBatchDownload;
+  fetchResult: typeof fetch;
+  publicOrigin: string;
+}): Promise<string> {
+  const blob = await fetchResultBlob(input);
+  return writeBlobFile(input.directory, filenameForImageType(input.result.filename, blob.type), blob);
 }
 
 export async function saveHorizonBatchResults(input: {
@@ -254,4 +268,46 @@ export async function saveHorizonBatchResults(input: {
     }
   }
   return { savedFiles, failureCount };
+}
+
+export async function saveHorizonBatchPngPsd(input: {
+  root: HorizonDirectoryHandle;
+  original: Blob;
+  results: readonly HorizonBatchDownload[];
+  fetchResult?: typeof fetch;
+  publicOrigin?: string;
+  createArtifacts?: (input: { original: Blob; generated: Blob; filename: string }) => Promise<HorizonPngPsdArtifacts>;
+}): Promise<{ savedFiles: string[]; savedResultCount: number; failureCount: number; failedResults: HorizonBatchDownload[] }> {
+  let output: HorizonDirectoryHandle;
+  try {
+    output = await input.root.getDirectoryHandle("완성본", { create: true });
+  } catch {
+    return { savedFiles: [], savedResultCount: 0, failureCount: input.results.length, failedResults: [...input.results] };
+  }
+  const publicOrigin = input.publicOrigin ?? (typeof window === "undefined" ? "https://hdex.invalid" : window.location.origin);
+  const createArtifacts = input.createArtifacts ?? createHorizonPngPsdArtifacts;
+  const fetchResult = input.fetchResult ?? fetch;
+  const savedFiles: string[] = [];
+  const failedResults: HorizonBatchDownload[] = [];
+  let savedResultCount = 0;
+  for (const result of input.results) {
+    const writtenForResult: string[] = [];
+    try {
+      const generated = await fetchResultBlob({ result, fetchResult, publicOrigin });
+      const artifacts = await createArtifacts({ original: input.original, generated, filename: result.filename });
+      writtenForResult.push(await writeBlobFile(output, artifacts.pngFilename, artifacts.png));
+      writtenForResult.push(await writeBlobFile(output, artifacts.psdFilename, artifacts.psd));
+      savedFiles.push(...writtenForResult);
+      savedResultCount += 1;
+    } catch {
+      for (const filename of writtenForResult) await output.removeEntry?.(filename).catch(() => undefined);
+      failedResults.push(result);
+    }
+  }
+  return {
+    savedFiles,
+    savedResultCount,
+    failureCount: failedResults.length,
+    failedResults,
+  };
 }

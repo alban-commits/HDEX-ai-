@@ -1,13 +1,22 @@
 import type { Psd } from "ag-psd";
 
-export type HorizonLayeredPsdSource = {
-  originalUrl: string;
-  generatedUrl: string;
+export type HorizonImageSource = string | Blob;
+
+export type HorizonPngPsdArtifacts = {
+  png: Blob;
+  psd: Blob;
+  pngFilename: string;
+  psdFilename: string;
+};
+
+export type HorizonPngPsdSource = {
+  original: HorizonImageSource;
+  generated: HorizonImageSource;
   filename: string;
 };
 
-export function horizonLayeredPsdFilename(value: string): string {
-  const base = value
+function safeOutputBase(value: string): string {
+  return value
     .replace(/\.[a-z0-9]+$/i, "")
     .replace(/[<>:"/\\|?*]/g, "-")
     .split("")
@@ -15,8 +24,16 @@ export function horizonLayeredPsdFilename(value: string): string {
     .join("")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 80);
-  return `${base || "horizon-result"}-원본+생성본.psd`;
+    .slice(0, 80) || "horizon-result";
+}
+
+export function horizonPngPsdFilenames(value: string): { png: string; psd: string } {
+  const base = safeOutputBase(value);
+  return { png: `${base}.png`, psd: `${base}.psd` };
+}
+
+export function horizonLayeredPsdFilename(value: string): string {
+  return horizonPngPsdFilenames(value).psd;
 }
 
 function createCanvas(width: number, height: number): HTMLCanvasElement {
@@ -26,11 +43,17 @@ function createCanvas(width: number, height: number): HTMLCanvasElement {
   return canvas;
 }
 
-async function decodeImage(url: string): Promise<ImageBitmap> {
-  const response = await fetch(url, { credentials: "include" });
-  if (!response.ok) throw new Error(`layered_psd_image_fetch_failed_${response.status}`);
+async function sourceBlob(source: HorizonImageSource): Promise<Blob> {
+  if (source instanceof Blob) return source;
+  const response = await fetch(source, { credentials: "include" });
+  if (!response.ok) throw new Error(`horizon_output_fetch_failed_${response.status}`);
   const blob = await response.blob();
-  return createImageBitmap(blob, { imageOrientation: "from-image" });
+  if (!blob.type.toLowerCase().startsWith("image/")) throw new Error("horizon_output_type_invalid");
+  return blob;
+}
+
+async function decodeImage(source: HorizonImageSource): Promise<ImageBitmap> {
+  return createImageBitmap(await sourceBlob(source), { imageOrientation: "from-image" });
 }
 
 function drawCover(
@@ -53,24 +76,34 @@ function drawCover(
   );
 }
 
-export async function createHorizonLayeredPsdBytes(
-  originalUrl: string,
-  generatedUrl: string,
-): Promise<ArrayBuffer> {
+function canvasPng(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("horizon_png_encode_failed"));
+    }, "image/png");
+  });
+}
+
+export async function createHorizonPngPsdArtifacts({
+  original,
+  generated,
+  filename,
+}: HorizonPngPsdSource): Promise<HorizonPngPsdArtifacts> {
   const [originalBitmap, generatedBitmap] = await Promise.all([
-    decodeImage(originalUrl),
-    decodeImage(generatedUrl),
+    decodeImage(original),
+    decodeImage(generated),
   ]);
   try {
     const width = generatedBitmap.width;
     const height = generatedBitmap.height;
-    if (!width || !height) throw new Error("layered_psd_image_dimensions_invalid");
+    if (!width || !height) throw new Error("horizon_output_dimensions_invalid");
 
-    const original = createCanvas(width, height);
-    const generated = createCanvas(width, height);
-    const originalContext = original.getContext("2d");
-    const generatedContext = generated.getContext("2d");
-    if (!originalContext || !generatedContext) throw new Error("layered_psd_canvas_unavailable");
+    const originalCanvas = createCanvas(width, height);
+    const generatedCanvas = createCanvas(width, height);
+    const originalContext = originalCanvas.getContext("2d");
+    const generatedContext = generatedCanvas.getContext("2d");
+    if (!originalContext || !generatedContext) throw new Error("horizon_output_canvas_unavailable");
 
     drawCover(
       originalContext,
@@ -85,16 +118,10 @@ export async function createHorizonLayeredPsdBytes(
     const psd: Psd = {
       width,
       height,
-      canvas: generated,
+      canvas: generatedCanvas,
       children: [
-        {
-          name: "02_AI 의상 생성본",
-          canvas: generated,
-        },
-        {
-          name: "01_원본 모델",
-          canvas: original,
-        },
+        { name: "02_AI 의상 생성본", canvas: generatedCanvas },
+        { name: "01_원본 모델", canvas: originalCanvas },
       ],
       imageResources: {
         resolutionInfo: {
@@ -107,12 +134,22 @@ export async function createHorizonLayeredPsdBytes(
         },
       },
     };
-    const { writePsd } = await import("ag-psd");
-    return writePsd(psd, {
+    const [{ writePsd }, png] = await Promise.all([
+      import("ag-psd"),
+      canvasPng(generatedCanvas),
+    ]);
+    const psdBytes = writePsd(psd, {
       compress: true,
       generateThumbnail: true,
       noBackground: true,
     });
+    const names = horizonPngPsdFilenames(filename);
+    return {
+      png,
+      psd: new Blob([psdBytes], { type: "image/vnd.adobe.photoshop" }),
+      pngFilename: names.png,
+      psdFilename: names.psd,
+    };
   } finally {
     originalBitmap.close();
     generatedBitmap.close();
@@ -127,17 +164,14 @@ function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-export async function downloadHorizonLayeredPsd({
-  originalUrl,
-  generatedUrl,
-  filename,
-}: HorizonLayeredPsdSource): Promise<void> {
-  const bytes = await createHorizonLayeredPsdBytes(originalUrl, generatedUrl);
-  downloadBlob(
-    new Blob([bytes], { type: "image/vnd.adobe.photoshop" }),
-    horizonLayeredPsdFilename(filename),
-  );
+export function downloadHorizonPngPsdArtifacts(artifacts: HorizonPngPsdArtifacts): void {
+  downloadBlob(artifacts.png, artifacts.pngFilename);
+  downloadBlob(artifacts.psd, artifacts.psdFilename);
+}
+
+export async function downloadHorizonPngAndLayeredPsd(input: HorizonPngPsdSource): Promise<void> {
+  downloadHorizonPngPsdArtifacts(await createHorizonPngPsdArtifacts(input));
 }

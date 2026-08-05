@@ -4,8 +4,8 @@ import { validateImageBytes } from "./image-validation.server";
 import { withTemporaryFile } from "./temporary-storage.server";
 import type { TemporaryStorageConfig } from "./runtime-config.server";
 
-export const MAX_RESULT_BYTES = 25 * 1024 * 1024;
-export const RESULT_DOWNLOAD_TIMEOUT_MS = 30_000;
+export const MAX_RESULT_BYTES = 80 * 1024 * 1024;
+export const RESULT_DOWNLOAD_TIMEOUT_MS = 120_000;
 
 function trustedResultUrl(value: string): URL {
   const url = new URL(value);
