@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
+import { initializeCanvas, readPsd } from "ag-psd";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { createJobClient, type Generation, type ListResult } from "@higgsfield/fnf/client";
 import { nanoBanana2 } from "@higgsfield/fnf/jobs";
@@ -12,7 +13,7 @@ import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, Hori
 import { HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { HORIZON_UPLOAD_MAX_EDGE, HORIZON_UPLOAD_TARGET_BYTES, HORIZON_UPLOAD_TARGET_PIXELS, horizonOptimizedDimensions, optimizeHorizonUploadFile, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
-import { horizonLayeredPsdFilename } from "../src/lib/horizon-restore.browser";
+import { createHorizonLayeredPsdBytes, horizonLayeredPsdFilename } from "../src/lib/horizon-restore.browser";
 import { generationToGalleryItem } from "../src/lib/higgsfield-generation-results";
 import { disconnectHiggsfieldOAuth } from "../src/lib/fnf.browser";
 import { buildCodexPrompt, compilePrompt, composeHorizonPrompt, HORIZON_OPENAI_TIMEOUT_MS, HORIZON_PROMPT_IMAGE_MAX_EDGE, HORIZON_PROMPT_VERSION, prepareHorizonPromptImages, promptSchema, referenceGuard } from "../src/server/horizon-prompt.server";
@@ -63,6 +64,23 @@ function directoryHandle(
 describe("Horizon selection and folder contracts", () => {
   test("keeps layered Photoshop filenames bounded and filesystem-safe", () => {
     expect(horizonLayeredPsdFilename('look:01/정면?.png')).toBe("look-01-정면-.psd");
+  });
+
+  test("writes a Photoshop-readable two-layer PSD from raw browser pixels", async () => {
+    initializeCanvas(
+      (() => { throw new Error("canvas_not_expected"); }) as unknown as (width: number, height: number) => HTMLCanvasElement,
+      (width, height) => ({ data: new Uint8ClampedArray(width * height * 4), width, height, colorSpace: "srgb" }) as ImageData,
+    );
+    const bytes = await createHorizonLayeredPsdBytes({
+      width: 2,
+      height: 1,
+      originalPixels: new Uint8ClampedArray([255, 0, 0, 255, 255, 0, 0, 255]),
+      generatedPixels: new Uint8ClampedArray([0, 0, 255, 255, 0, 0, 255, 255]),
+    });
+    const psd = readPsd(bytes, { useImageData: true });
+    expect(psd.children?.map((layer) => layer.name)).toEqual(["02_AI 의상 생성본", "01_원본 모델"]);
+    expect(Array.from(psd.children?.[0]?.imageData?.data ?? [])).toEqual([0, 0, 255, 255, 0, 0, 255, 255]);
+    expect(Array.from(psd.children?.[1]?.imageData?.data ?? [])).toEqual([255, 0, 0, 255, 255, 0, 0, 255]);
   });
 
   test("does not show a connected or disconnected state while OAuth scope is loading", () => {
@@ -396,6 +414,28 @@ describe("Horizon browser directory boundary", () => {
     expect([...written.keys()]).toEqual(["상품-A.png", "상품-A.psd"]);
   });
 
+  test("does not leave an empty completed folder when PNG and PSD creation fails", async () => {
+    let completedFolderCalls = 0;
+    const rootHandle = {
+      ...directoryHandle("작업루트", []),
+      getDirectoryHandle: async () => {
+        completedFolderCalls += 1;
+        return directoryHandle("완성본", []);
+      },
+    } satisfies HorizonDirectoryHandle;
+    const result = { url: "/api/higgsfield/result/job-artifact-failure", filename: "상품-A.png" };
+    const saved = await saveHorizonBatchPngPsd({
+      root: rootHandle,
+      original: new Blob(["original"], { type: "image/png" }),
+      results: [result],
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async () => new Response(new Blob(["generated"], { type: "image/png" }), { headers: { "content-type": "image/png" } }),
+      createArtifacts: async () => { throw new Error("artifact_failed"); },
+    });
+    expect(saved).toEqual({ savedFiles: [], savedResultCount: 0, failureCount: 1, failedResults: [result] });
+    expect(completedFolderCalls).toBe(0);
+  });
+
   test("removes a partial PNG when the matching PSD cannot be written", async () => {
     const removed: string[] = [];
     const output = {
@@ -606,8 +646,8 @@ describe("Horizon browser mutation boundaries", () => {
 });
 
 describe("Horizon prompt contract", () => {
-  test("preserves the V7 schema, hierarchy, grouped references, and golden compiled sections", () => {
-    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v7-terra");
+  test("preserves the V8 schema, hierarchy, grouped references, and golden compiled sections", () => {
+    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v8-terra");
     expect(HORIZON_OPENAI_TIMEOUT_MS).toBe(180_000);
     expect(HORIZON_PROMPT_IMAGE_MAX_EDGE).toBe(2_048);
     expect(promptSchema().required).toHaveLength(16);
@@ -616,8 +656,9 @@ describe("Horizon prompt contract", () => {
     expect(guard).toMatchObject({fullLook:true,top:true,bottom:true,shoes:true,socks:false,accessories:false});
     const prompt = compilePrompt({ task:"Transfer",target_view:"front",primary_base:"Image 1",reference_roles:["Image 1 base"],identity_anatomy_lock:"Lock identity",pose_camera_lock:"Lock camera",environment_lock:"Lock environment",full_look_transfer:"Transfer look",top_transfer:"Top",bottom_transfer:"Bottom",footwear_transfer:"Shoes",socks_transfer:"",accessories_transfer:"",fit_material_realism:"Natural fit",preserve:["face"],exclude:["text"] },"2:3",images);
     expect(prompt).toContain("PRIMARY IMMUTABLE BASE: Image 1");
+    expect(prompt).toContain("DETERMINISTIC SOURCE IMAGE ASSIGNMENT: Image 1 = M1 · 모델 정면; Image 2 = W1 · 전신 착장; Image 3 = W2 · 상의 디테일; Image 4 = W3 · 하의 디테일; Image 5 = A1 · 신발");
     expect(prompt).toContain("FULL LOOK mandates complete upper-and-lower wardrobe replacement");
-    expect(prompt).toContain("MANDATORY: Replace both the original base upper garment and original base lower garment");
+    expect(prompt).toContain("MANDATORY: Use Image 2 as the FULL LOOK wardrobe target and replace both the original base upper garment and original base lower garment");
     expect(prompt).toContain("MANDATORY: Replace the original base upper garment with the dedicated TOP product");
     expect(prompt).toContain("MANDATORY: Replace the original base lower garment with the dedicated BOTTOM product");
     expect(prompt).toContain("AUTHORIZED REPLACEMENTS: upper garment only; lower garment only; shoes only");
@@ -637,9 +678,9 @@ describe("Horizon prompt contract", () => {
   test("forces both garments from full look when dedicated top and bottom references are absent", () => {
     const images = [{category:"M1 · 모델 정면"},{category:"W1 · 전신 착장"}];
     const prompt = compilePrompt({ task:"Transfer",target_view:"front",primary_base:"Image 1",reference_roles:["Image 1 base","Image 2 full look"],identity_anatomy_lock:"Lock identity",pose_camera_lock:"Lock camera",environment_lock:"Lock environment",full_look_transfer:"Use Image 2 outfit",top_transfer:"",bottom_transfer:"",footwear_transfer:"",socks_transfer:"",accessories_transfer:"",fit_material_realism:"Natural fit",preserve:["face"],exclude:["text"] },"2:3",images);
-    expect(prompt).toContain("FULL-LOOK MANDATORY TRANSFER: Use Image 2 outfit MANDATORY: Replace both the original base upper garment and original base lower garment");
-    expect(prompt).toContain("TOP PRODUCT TRANSFER: No dedicated TOP reference is supplied. Derive the upper garment completely from FULL LOOK");
-    expect(prompt).toContain("BOTTOM PRODUCT TRANSFER: No dedicated BOTTOM reference is supplied. Derive the lower garment completely from FULL LOOK");
+    expect(prompt).toContain("FULL-LOOK MANDATORY TRANSFER: Use Image 2 outfit MANDATORY: Use Image 2 as the FULL LOOK wardrobe target");
+    expect(prompt).toContain("TOP PRODUCT TRANSFER: No dedicated TOP reference is supplied. Derive the upper garment completely from Image 2");
+    expect(prompt).toContain("BOTTOM PRODUCT TRANSFER: No dedicated BOTTOM reference is supplied. Derive the lower garment completely from Image 2");
     expect(prompt).not.toContain("original base upper garment; original base lower garment");
   });
 

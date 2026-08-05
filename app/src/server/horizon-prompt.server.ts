@@ -3,7 +3,7 @@ import sharp from "sharp";
 import { MAX_IMAGE_PIXELS } from "./image-validation.server";
 import { imageDataUrl, postOpenAiJson } from "./openai-image-input.server";
 
-export const HORIZON_PROMPT_VERSION = "fashion-auto-numbering-multi-reference-v7-terra";
+export const HORIZON_PROMPT_VERSION = "fashion-auto-numbering-multi-reference-v8-terra";
 export const HORIZON_OPENAI_TIMEOUT_MS = 180_000;
 export const HORIZON_PROMPT_IMAGE_MAX_EDGE = 2_048;
 export type HorizonPromptImage = { category: string; bytes: Uint8Array; contentType: "image/jpeg" | "image/png" | "image/webp" };
@@ -104,23 +104,50 @@ export function referenceGuard(images: readonly { category: string }[]) {
 
 export function compilePrompt(s: Record<string, unknown>, ratio: string, images: readonly { category: string }[]): string {
   const guard = referenceGuard(images); const arrayText = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").join("; ") : "";
+  const sourceImages = (label: string) => images.flatMap((item, index) => item.category.includes(label) ? [`Image ${index + 1}`] : []);
+  const sourceAssignment = images.map((item, index) => `Image ${index + 1} = ${item.category}`).join("; ");
+  const fullLookSources = sourceImages("전신 착장").join(", ");
+  const topSources = sourceImages("상의 디테일").join(", ");
+  const bottomSources = sourceImages("하의 디테일").join(", ");
   const fullLookTransfer = guard.fullLook
-    ? `${String(s.full_look_transfer ?? "").trim()} MANDATORY: Replace both the original base upper garment and original base lower garment with the FULL LOOK outfit. FULL LOOK is the wardrobe target, not visual context; neither original base garment may remain.`.trim()
+    ? `${String(s.full_look_transfer ?? "").trim()} MANDATORY: Use ${fullLookSources} as the FULL LOOK wardrobe target and replace both the original base upper garment and original base lower garment with that visible outfit. FULL LOOK is not optional visual context; neither original base garment may remain.`.trim()
     : "";
   const topTransfer = guard.dedicatedTop
-    ? `${String(s.top_transfer ?? "").trim()} MANDATORY: Replace the original base upper garment with the dedicated TOP product. Its visible product details override FULL LOOK.`.trim()
+    ? `${String(s.top_transfer ?? "").trim()} MANDATORY: Replace the original base upper garment with the dedicated TOP product shown in ${topSources}. Its visible product details override FULL LOOK.`.trim()
     : guard.fullLook
-      ? "No dedicated TOP reference is supplied. Derive the upper garment completely from FULL LOOK and replace the original base upper garment; do not preserve, retain, or restyle the original top."
+      ? `No dedicated TOP reference is supplied. Derive the upper garment completely from ${fullLookSources} and replace the original base upper garment; do not preserve, retain, or restyle the original top.`
       : "";
   const bottomTransfer = guard.dedicatedBottom
-    ? `${String(s.bottom_transfer ?? "").trim()} MANDATORY: Replace the original base lower garment with the dedicated BOTTOM product. Its visible product details override FULL LOOK.`.trim()
+    ? `${String(s.bottom_transfer ?? "").trim()} MANDATORY: Replace the original base lower garment with the dedicated BOTTOM product shown in ${bottomSources}. Its visible product details override FULL LOOK.`.trim()
     : guard.fullLook
-      ? "No dedicated BOTTOM reference is supplied. Derive the lower garment completely from FULL LOOK and replace the original base lower garment; do not preserve, retain, or restyle the original bottom."
+      ? `No dedicated BOTTOM reference is supplied. Derive the lower garment completely from ${fullLookSources} and replace the original base lower garment; do not preserve, retain, or restyle the original bottom.`
       : "";
   const replacementPriority = guard.fullLook
     ? "FULL LOOK mandates complete upper-and-lower wardrobe replacement. Dedicated TOP and BOTTOM references, when present, override only their corresponding product details. Any conflicting instruction to preserve the original base upper or lower garment is void."
     : "Each supplied dedicated TOP or BOTTOM reference mandates replacement of its corresponding base garment. Preserve only garment roles with no supplied reference.";
-  const parts: Array<[string, unknown]> = [["TASK",s.task],["TARGET VIEW",s.target_view],["PRIMARY IMMUTABLE BASE",s.primary_base],["REFERENCE ROLE MAP",arrayText(s.reference_roles)],["WARDROBE REPLACEMENT PRIORITY",replacementPriority],["IDENTITY & ANATOMY LOCK",s.identity_anatomy_lock],["POSE, CAMERA & FRAMING LOCK",s.pose_camera_lock],["BACKGROUND, LIGHTING & SHADOW LOCK",s.environment_lock],["FULL-LOOK MANDATORY TRANSFER",fullLookTransfer],["TOP PRODUCT TRANSFER",topTransfer],["BOTTOM PRODUCT TRANSFER",bottomTransfer],["FOOTWEAR TRANSFER",guard.shoes?s.footwear_transfer:""],["SOCKS TRANSFER",guard.socks?s.socks_transfer:""],["ACCESSORY TRANSFER",guard.accessories?s.accessories_transfer:""],["AUTHORIZED REPLACEMENTS",guard.authorized],["UNREFERENCED ITEMS — PRESERVE FROM BASE",guard.preserve],["PHYSICAL FIT & MATERIAL REALISM",s.fit_material_realism],["PRESERVE EXACTLY",arrayText(s.preserve)],["DO NOT ADD, CHANGE, OR IMPORT",arrayText(s.exclude)],["FINAL OUTPUT",`One centered subject only. ${ratio} aspect ratio. Photorealistic high-end studio fashion photograph. The result must look like the primary base photograph itself with every authorized wardrobe and wearable product visibly replaced. Authorized product replacement overrides any conflicting preservation wording. Preserve exact view-dependent visibility, physically accurate anatomy, garment construction, fabric drape, contact points, occlusion, perspective, floor contact, and cast shadows. No artificial composite or cutout look.`]];
+  const parts: Array<[string, unknown]> = [
+    ["TASK", s.task],
+    ["TARGET VIEW", s.target_view],
+    ["PRIMARY IMMUTABLE BASE", s.primary_base],
+    ["DETERMINISTIC SOURCE IMAGE ASSIGNMENT", sourceAssignment],
+    ["REFERENCE ROLE MAP", arrayText(s.reference_roles)],
+    ["WARDROBE REPLACEMENT PRIORITY", replacementPriority],
+    ["IDENTITY & ANATOMY LOCK", s.identity_anatomy_lock],
+    ["POSE, CAMERA & FRAMING LOCK", s.pose_camera_lock],
+    ["BACKGROUND, LIGHTING & SHADOW LOCK", s.environment_lock],
+    ["FULL-LOOK MANDATORY TRANSFER", fullLookTransfer],
+    ["TOP PRODUCT TRANSFER", topTransfer],
+    ["BOTTOM PRODUCT TRANSFER", bottomTransfer],
+    ["FOOTWEAR TRANSFER", guard.shoes ? s.footwear_transfer : ""],
+    ["SOCKS TRANSFER", guard.socks ? s.socks_transfer : ""],
+    ["ACCESSORY TRANSFER", guard.accessories ? s.accessories_transfer : ""],
+    ["AUTHORIZED REPLACEMENTS", guard.authorized],
+    ["UNREFERENCED ITEMS — PRESERVE FROM BASE", guard.preserve],
+    ["PHYSICAL FIT & MATERIAL REALISM", s.fit_material_realism],
+    ["PRESERVE EXACTLY", arrayText(s.preserve)],
+    ["DO NOT ADD, CHANGE, OR IMPORT", arrayText(s.exclude)],
+    ["FINAL OUTPUT", `One centered subject only. ${ratio} aspect ratio. Photorealistic high-end studio fashion photograph. The result must look like the primary base photograph itself with every authorized wardrobe and wearable product visibly replaced. Authorized product replacement overrides any conflicting preservation wording. Preserve exact view-dependent visibility, physically accurate anatomy, garment construction, fabric drape, contact points, occlusion, perspective, floor contact, and cast shadows. No artificial composite or cutout look.`],
+  ];
   return parts.filter(([,value])=>String(value??"").trim()).map(([key,value])=>`${key}: ${String(value).trim()}`).join("\n");
 }
 

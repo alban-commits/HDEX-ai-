@@ -278,12 +278,7 @@ export async function saveHorizonBatchPngPsd(input: {
   publicOrigin?: string;
   createArtifacts?: (input: { original: Blob; generated: Blob; filename: string }) => Promise<HorizonPngPsdArtifacts>;
 }): Promise<{ savedFiles: string[]; savedResultCount: number; failureCount: number; failedResults: HorizonBatchDownload[] }> {
-  let output: HorizonDirectoryHandle;
-  try {
-    output = await input.root.getDirectoryHandle("완성본", { create: true });
-  } catch {
-    return { savedFiles: [], savedResultCount: 0, failureCount: input.results.length, failedResults: [...input.results] };
-  }
+  let output: HorizonDirectoryHandle | undefined;
   const publicOrigin = input.publicOrigin ?? (typeof window === "undefined" ? "https://hdex.invalid" : window.location.origin);
   const createArtifacts = input.createArtifacts ?? createHorizonPngPsdArtifacts;
   const fetchResult = input.fetchResult ?? fetch;
@@ -295,12 +290,13 @@ export async function saveHorizonBatchPngPsd(input: {
     try {
       const generated = await fetchResultBlob({ result, fetchResult, publicOrigin });
       const artifacts = await createArtifacts({ original: input.original, generated, filename: result.filename });
+      output ??= await input.root.getDirectoryHandle("완성본", { create: true });
       writtenForResult.push(await writeBlobFile(output, artifacts.pngFilename, artifacts.png));
       writtenForResult.push(await writeBlobFile(output, artifacts.psdFilename, artifacts.psd));
       savedFiles.push(...writtenForResult);
       savedResultCount += 1;
     } catch {
-      for (const filename of writtenForResult) await output.removeEntry?.(filename).catch(() => undefined);
+      for (const filename of writtenForResult) await output?.removeEntry?.(filename).catch(() => undefined);
       failedResults.push(result);
     }
   }

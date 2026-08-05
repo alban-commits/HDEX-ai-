@@ -15,6 +15,41 @@ export type HorizonPngPsdSource = {
   filename: string;
 };
 
+export async function createHorizonLayeredPsdBytes(input: {
+  width: number;
+  height: number;
+  originalPixels: Uint8ClampedArray;
+  generatedPixels: Uint8ClampedArray;
+}): Promise<Uint8Array> {
+  const { writePsdUint8Array } = await import("ag-psd");
+  const originalImageData = { data: input.originalPixels, width: input.width, height: input.height };
+  const generatedImageData = { data: input.generatedPixels, width: input.width, height: input.height };
+  const psd: Psd = {
+    width: input.width,
+    height: input.height,
+    imageData: generatedImageData,
+    children: [
+      { name: "02_AI 의상 생성본", imageData: generatedImageData },
+      { name: "01_원본 모델", imageData: originalImageData },
+    ],
+    imageResources: {
+      resolutionInfo: {
+        horizontalResolution: 72,
+        horizontalResolutionUnit: "PPI",
+        widthUnit: "Inches",
+        verticalResolution: 72,
+        verticalResolutionUnit: "PPI",
+        heightUnit: "Inches",
+      },
+    },
+  };
+  return writePsdUint8Array(psd, {
+    compress: true,
+    generateThumbnail: false,
+    noBackground: true,
+  });
+}
+
 function safeOutputBase(value: string): string {
   return value
     .replace(/\.[a-z0-9]+$/i, "")
@@ -115,38 +150,21 @@ export async function createHorizonPngPsdArtifacts({
     );
     generatedContext.drawImage(generatedBitmap, 0, 0, width, height);
 
-    const psd: Psd = {
-      width,
-      height,
-      canvas: generatedCanvas,
-      children: [
-        { name: "02_AI 의상 생성본", canvas: generatedCanvas },
-        { name: "01_원본 모델", canvas: originalCanvas },
-      ],
-      imageResources: {
-        resolutionInfo: {
-          horizontalResolution: 72,
-          horizontalResolutionUnit: "PPI",
-          widthUnit: "Inches",
-          verticalResolution: 72,
-          verticalResolutionUnit: "PPI",
-          heightUnit: "Inches",
-        },
-      },
-    };
-    const [{ writePsd }, png] = await Promise.all([
-      import("ag-psd"),
+    const [psdBytes, png] = await Promise.all([
+      createHorizonLayeredPsdBytes({
+        width,
+        height,
+        originalPixels: originalContext.getImageData(0, 0, width, height).data,
+        generatedPixels: generatedContext.getImageData(0, 0, width, height).data,
+      }),
       canvasPng(generatedCanvas),
     ]);
-    const psdBytes = writePsd(psd, {
-      compress: true,
-      generateThumbnail: true,
-      noBackground: true,
-    });
     const names = horizonPngPsdFilenames(filename);
+    const psdBuffer = new ArrayBuffer(psdBytes.byteLength);
+    new Uint8Array(psdBuffer).set(psdBytes);
     return {
       png,
-      psd: new Blob([psdBytes], { type: "image/vnd.adobe.photoshop" }),
+      psd: new Blob([psdBuffer], { type: "image/vnd.adobe.photoshop" }),
       pngFilename: names.png,
       psdFilename: names.psd,
     };
