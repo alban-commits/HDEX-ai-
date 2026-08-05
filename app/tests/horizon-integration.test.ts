@@ -606,16 +606,20 @@ describe("Horizon browser mutation boundaries", () => {
 });
 
 describe("Horizon prompt contract", () => {
-  test("preserves the V6 schema, hierarchy, grouped references, and golden compiled sections", () => {
-    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v6-terra");
+  test("preserves the V7 schema, hierarchy, grouped references, and golden compiled sections", () => {
+    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v7-terra");
     expect(HORIZON_OPENAI_TIMEOUT_MS).toBe(180_000);
     expect(HORIZON_PROMPT_IMAGE_MAX_EDGE).toBe(2_048);
     expect(promptSchema().required).toHaveLength(16);
-    const images = [{category:"M1 · 모델 정면"},{category:"W1 · 전신 착장"},{category:"A1 · 신발"}];
+    const images = [{category:"M1 · 모델 정면"},{category:"W1 · 전신 착장"},{category:"W2 · 상의 디테일"},{category:"W3 · 하의 디테일"},{category:"A1 · 신발"}];
     const guard = referenceGuard(images);
     expect(guard).toMatchObject({fullLook:true,top:true,bottom:true,shoes:true,socks:false,accessories:false});
     const prompt = compilePrompt({ task:"Transfer",target_view:"front",primary_base:"Image 1",reference_roles:["Image 1 base"],identity_anatomy_lock:"Lock identity",pose_camera_lock:"Lock camera",environment_lock:"Lock environment",full_look_transfer:"Transfer look",top_transfer:"Top",bottom_transfer:"Bottom",footwear_transfer:"Shoes",socks_transfer:"",accessories_transfer:"",fit_material_realism:"Natural fit",preserve:["face"],exclude:["text"] },"2:3",images);
     expect(prompt).toContain("PRIMARY IMMUTABLE BASE: Image 1");
+    expect(prompt).toContain("FULL LOOK mandates complete upper-and-lower wardrobe replacement");
+    expect(prompt).toContain("MANDATORY: Replace both the original base upper garment and original base lower garment");
+    expect(prompt).toContain("MANDATORY: Replace the original base upper garment with the dedicated TOP product");
+    expect(prompt).toContain("MANDATORY: Replace the original base lower garment with the dedicated BOTTOM product");
     expect(prompt).toContain("AUTHORIZED REPLACEMENTS: upper garment only; lower garment only; shoes only");
     expect(prompt).toContain("original base socks or bare-ankle state exactly");
     expect(prompt).toContain("FINAL OUTPUT: One centered subject only. 2:3 aspect ratio.");
@@ -628,6 +632,23 @@ describe("Horizon prompt contract", () => {
     expect(groupedPrompt).toContain("W2-1, W2-2, and W2-3 are one reference group");
     expect(groupedPrompt).toContain("2. W2-1 · 상의 디테일");
     expect(groupedPrompt).toContain("3. W2-2 · 상의 디테일");
+  });
+
+  test("forces both garments from full look when dedicated top and bottom references are absent", () => {
+    const images = [{category:"M1 · 모델 정면"},{category:"W1 · 전신 착장"}];
+    const prompt = compilePrompt({ task:"Transfer",target_view:"front",primary_base:"Image 1",reference_roles:["Image 1 base","Image 2 full look"],identity_anatomy_lock:"Lock identity",pose_camera_lock:"Lock camera",environment_lock:"Lock environment",full_look_transfer:"Use Image 2 outfit",top_transfer:"",bottom_transfer:"",footwear_transfer:"",socks_transfer:"",accessories_transfer:"",fit_material_realism:"Natural fit",preserve:["face"],exclude:["text"] },"2:3",images);
+    expect(prompt).toContain("FULL-LOOK MANDATORY TRANSFER: Use Image 2 outfit MANDATORY: Replace both the original base upper garment and original base lower garment");
+    expect(prompt).toContain("TOP PRODUCT TRANSFER: No dedicated TOP reference is supplied. Derive the upper garment completely from FULL LOOK");
+    expect(prompt).toContain("BOTTOM PRODUCT TRANSFER: No dedicated BOTTOM reference is supplied. Derive the lower garment completely from FULL LOOK");
+    expect(prompt).not.toContain("original base upper garment; original base lower garment");
+  });
+
+  test("uses dedicated top and bottom as mandatory replacements without a full look", () => {
+    const images = [{category:"M1 · 모델 정면"},{category:"W2 · 상의 디테일"},{category:"W3 · 하의 디테일"}];
+    const prompt = compilePrompt({ task:"Transfer",target_view:"front",primary_base:"Image 1",reference_roles:["Image 1 base","Image 2 top","Image 3 bottom"],identity_anatomy_lock:"Lock identity",pose_camera_lock:"Lock camera",environment_lock:"Lock environment",full_look_transfer:"",top_transfer:"Use Image 2 top",bottom_transfer:"Use Image 3 bottom",footwear_transfer:"",socks_transfer:"",accessories_transfer:"",fit_material_realism:"Natural fit",preserve:["face"],exclude:["text"] },"2:3",images);
+    expect(prompt).toContain("TOP PRODUCT TRANSFER: Use Image 2 top MANDATORY: Replace the original base upper garment");
+    expect(prompt).toContain("BOTTOM PRODUCT TRANSFER: Use Image 3 bottom MANDATORY: Replace the original base lower garment");
+    expect(prompt).toContain("Each supplied dedicated TOP or BOTTOM reference mandates replacement");
   });
 
   test("bounds prompt-analysis images and reports a dedicated GPT timeout", async () => {
