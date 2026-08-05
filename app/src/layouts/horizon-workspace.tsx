@@ -473,16 +473,24 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
             const browserDownloaded = browserResults.length
               ? await downloadBatchPngPsd(browserResults, originalFile, false)
               : { successCount: 0, failureCount: 0 };
+            const folderSaveExpected = Boolean(batchDirectory && batchDirectoryPermission === "granted");
+            const persistenceComplete = folderSaveExpected
+              ? saved.savedResultCount === outcome.results.length
+              : browserDownloaded.successCount === outcome.results.length;
             setBatch((items) => items.map((item) => item.key === current.key ? {
               ...item,
-              status: outcome.successCount > 0 ? "completed" : "failed",
+              status: outcome.successCount > 0 && persistenceComplete ? "completed" : "failed",
               ...outcome,
               originalFile,
               savedFiles: saved.savedFiles,
               savedResultCount: saved.savedResultCount,
               saveFailureCount: saved.failureCount,
               browserDownloadCount: browserDownloaded.successCount,
-              message: outcome.successCount > 0
+              message: outcome.successCount > 0 && !persistenceComplete
+                ? folderSaveExpected
+                  ? `이미지 ${outcome.successCount}장은 생성됐지만 선택한 경로의 완성본 폴더에 PNG+PSD를 모두 저장하지 못했습니다.`
+                  : `이미지 ${outcome.successCount}장은 생성됐지만 PNG+PSD 다운로드를 모두 완료하지 못했습니다.`
+                : outcome.successCount > 0
                 ? `${outcome.successCount}장 성공${outcome.failureCount ? ` · ${outcome.failureCount}장 생성 실패` : ""}${saved.savedResultCount ? ` · 완성본 PNG+PSD ${saved.savedResultCount}세트 저장` : ""}${browserDownloaded.successCount ? ` · PNG+PSD ${browserDownloaded.successCount}세트 다운로드` : ""}${browserDownloaded.failureCount ? ` · ${browserDownloaded.failureCount}세트 저장 실패` : ""}`
                 : "완료된 이미지 결과가 없습니다.",
             } : item));

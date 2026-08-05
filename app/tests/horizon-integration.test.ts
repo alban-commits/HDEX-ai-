@@ -646,8 +646,8 @@ describe("Horizon browser mutation boundaries", () => {
 });
 
 describe("Horizon prompt contract", () => {
-  test("preserves the V8 schema, hierarchy, grouped references, and golden compiled sections", () => {
-    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v8-terra");
+  test("preserves the V9 schema, hierarchy, grouped references, and golden compiled sections", () => {
+    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v9-terra");
     expect(HORIZON_OPENAI_TIMEOUT_MS).toBe(180_000);
     expect(HORIZON_PROMPT_IMAGE_MAX_EDGE).toBe(2_048);
     expect(promptSchema().required).toHaveLength(16);
@@ -655,12 +655,12 @@ describe("Horizon prompt contract", () => {
     const guard = referenceGuard(images);
     expect(guard).toMatchObject({fullLook:true,top:true,bottom:true,shoes:true,socks:false,accessories:false});
     const prompt = compilePrompt({ task:"Transfer",target_view:"front",primary_base:"Image 1",reference_roles:["Image 1 base"],identity_anatomy_lock:"Lock identity",pose_camera_lock:"Lock camera",environment_lock:"Lock environment",full_look_transfer:"Transfer look",top_transfer:"Top",bottom_transfer:"Bottom",footwear_transfer:"Shoes",socks_transfer:"",accessories_transfer:"",fit_material_realism:"Natural fit",preserve:["face"],exclude:["text"] },"2:3",images);
-    expect(prompt).toContain("PRIMARY IMMUTABLE BASE: Image 1");
+    expect(prompt).toContain("PRIMARY MODEL — IMMUTABLE NON-CLOTHING ONLY: Image 1 controls only the same person");
     expect(prompt).toContain("DETERMINISTIC SOURCE IMAGE ASSIGNMENT: Image 1 = M1 · 모델 정면; Image 2 = W1 · 전신 착장; Image 3 = W2 · 상의 디테일; Image 4 = W3 · 하의 디테일; Image 5 = A1 · 신발");
     expect(prompt).toContain("FULL LOOK mandates complete upper-and-lower wardrobe replacement");
-    expect(prompt).toContain("MANDATORY: Use Image 2 as the FULL LOOK wardrobe target and replace both the original base upper garment and original base lower garment");
-    expect(prompt).toContain("MANDATORY: Replace the original base upper garment with the dedicated TOP product");
-    expect(prompt).toContain("MANDATORY: Replace the original base lower garment with the dedicated BOTTOM product");
+    expect(prompt).toContain("MANDATORY: Use Image 2 as the FULL LOOK wardrobe target and replace both original base garments");
+    expect(prompt).toContain("MANDATORY: Replace the original base upper garment with the TOP product shown in Image 3");
+    expect(prompt).toContain("MANDATORY: Replace the original base lower garment with the BOTTOM product shown in Image 4");
     expect(prompt).toContain("AUTHORIZED REPLACEMENTS: upper garment only; lower garment only; shoes only");
     expect(prompt).toContain("original base socks or bare-ankle state exactly");
     expect(prompt).toContain("FINAL OUTPUT: One centered subject only. 2:3 aspect ratio.");
@@ -678,7 +678,7 @@ describe("Horizon prompt contract", () => {
   test("forces both garments from full look when dedicated top and bottom references are absent", () => {
     const images = [{category:"M1 · 모델 정면"},{category:"W1 · 전신 착장"}];
     const prompt = compilePrompt({ task:"Transfer",target_view:"front",primary_base:"Image 1",reference_roles:["Image 1 base","Image 2 full look"],identity_anatomy_lock:"Lock identity",pose_camera_lock:"Lock camera",environment_lock:"Lock environment",full_look_transfer:"Use Image 2 outfit",top_transfer:"",bottom_transfer:"",footwear_transfer:"",socks_transfer:"",accessories_transfer:"",fit_material_realism:"Natural fit",preserve:["face"],exclude:["text"] },"2:3",images);
-    expect(prompt).toContain("FULL-LOOK MANDATORY TRANSFER: Use Image 2 outfit MANDATORY: Use Image 2 as the FULL LOOK wardrobe target");
+    expect(prompt).toContain("FULL-LOOK MANDATORY TRANSFER: Analyzed outfit details: Use Image 2 outfit. MANDATORY: Use Image 2 as the FULL LOOK wardrobe target");
     expect(prompt).toContain("TOP PRODUCT TRANSFER: No dedicated TOP reference is supplied. Derive the upper garment completely from Image 2");
     expect(prompt).toContain("BOTTOM PRODUCT TRANSFER: No dedicated BOTTOM reference is supplied. Derive the lower garment completely from Image 2");
     expect(prompt).not.toContain("original base upper garment; original base lower garment");
@@ -687,9 +687,38 @@ describe("Horizon prompt contract", () => {
   test("uses dedicated top and bottom as mandatory replacements without a full look", () => {
     const images = [{category:"M1 · 모델 정면"},{category:"W2 · 상의 디테일"},{category:"W3 · 하의 디테일"}];
     const prompt = compilePrompt({ task:"Transfer",target_view:"front",primary_base:"Image 1",reference_roles:["Image 1 base","Image 2 top","Image 3 bottom"],identity_anatomy_lock:"Lock identity",pose_camera_lock:"Lock camera",environment_lock:"Lock environment",full_look_transfer:"",top_transfer:"Use Image 2 top",bottom_transfer:"Use Image 3 bottom",footwear_transfer:"",socks_transfer:"",accessories_transfer:"",fit_material_realism:"Natural fit",preserve:["face"],exclude:["text"] },"2:3",images);
-    expect(prompt).toContain("TOP PRODUCT TRANSFER: Use Image 2 top MANDATORY: Replace the original base upper garment");
-    expect(prompt).toContain("BOTTOM PRODUCT TRANSFER: Use Image 3 bottom MANDATORY: Replace the original base lower garment");
+    expect(prompt).toContain("TOP PRODUCT TRANSFER: Analyzed top details: Use Image 2 top. MANDATORY: Replace the original base upper garment");
+    expect(prompt).toContain("BOTTOM PRODUCT TRANSFER: Analyzed bottom details: Use Image 3 bottom. MANDATORY: Replace the original base lower garment");
     expect(prompt).toContain("Each supplied dedicated TOP or BOTTOM reference mandates replacement");
+  });
+
+  test("drops GPT-authored base-clothing preservation conflicts from the final generation prompt", () => {
+    const images = [{category:"M1 · 모델 기준"},{category:"W1 · 전신 착장"},{category:"W2 · 상의 디테일"},{category:"W3 · 하의 디테일"}];
+    const prompt = compilePrompt({
+      task: "Preserve the original white tank top and black shorts",
+      target_view: "back",
+      primary_base: "Keep all original clothing from Image 1",
+      reference_roles: ["Treat Image 2 as optional context"],
+      identity_anatomy_lock: "Preserve the base outfit",
+      pose_camera_lock: "Lock camera",
+      environment_lock: "Lock environment",
+      full_look_transfer: "dark layered outfit",
+      top_transfer: "dark hooded top",
+      bottom_transfer: "dark shorts",
+      footwear_transfer: "",
+      socks_transfer: "",
+      accessories_transfer: "",
+      fit_material_realism: "Natural fit",
+      preserve: ["original white tank top", "original black shorts"],
+      exclude: ["clothing replacement"],
+    }, "2:3", images);
+    expect(prompt).not.toContain("Preserve the original white tank top and black shorts");
+    expect(prompt).not.toContain("Keep all original clothing from Image 1");
+    expect(prompt).not.toContain("Treat Image 2 as optional context");
+    expect(prompt).not.toContain("original white tank top");
+    expect(prompt).not.toContain("original black shorts");
+    expect(prompt).toContain("The base MODEL controls no clothing where a wardrobe role is authorized");
+    expect(prompt).toContain("Do not preserve any original base garment or wearable whose role is authorized for replacement");
   });
 
   test("bounds prompt-analysis images and reports a dedicated GPT timeout", async () => {
