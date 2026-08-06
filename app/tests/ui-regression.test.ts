@@ -114,7 +114,7 @@ describe("existing product UI regression boundary", () => {
       "여러 장 선택", "한 번에 여러 장 또는 반복해서 계속 추가",
       "폴더에서 이 카드로 드래그앤드롭 가능",
       "대량 생성 폴더 선택", "다시 스캔", "다른 폴더 선택", "폴더 권한 다시 승인",
-      "브라우저 방식으로 폴더 선택", "선택한 루트 폴더", "전체 작업 폴더",
+      "선택한 원본 경로", "전체 작업 폴더", "전체 PNG+PSD 완성본에 다시 저장",
       "상품별 폴더에 1.jpg부터 번호를 붙여 넣으세요. 같은 역할의 참고 이미지가 여러 장이면 3-1.jpg, 3-2.jpg 또는 4-1.jpg, 4-2.jpg처럼 정리한 뒤 상위 폴더를 선택하세요.",
       "같은 기본 번호의 하위 번호 이미지는 하나의 제품 역할로 함께 참고합니다.",
       "생성할 상품 폴더가 없습니다. 각 상품 폴더에 1.jpg가 필요합니다.",
@@ -123,6 +123,10 @@ describe("existing product UI regression boundary", () => {
       "AUTO JSON →", "아직 생성된 이미지가 없습니다.",
       "직원 공용",
     ]) expect(source).toContain(copy);
+    expect(component).not.toContain("브라우저 방식으로 폴더 선택");
+    expect(component).not.toContain("PNG와 PSD를 브라우저 다운로드로 함께 저장합니다.");
+    expect(component).toContain('batchDirectoryPermission!=="granted"');
+    expect(component).toContain("PNG와 PSD 중 하나라도 저장되지 않으면 해당 결과를 완료로 처리하지 않습니다.");
     expect(source).not.toContain("OPENAI_API_KEY 입력");
     expect(source).not.toContain("계정 드롭다운");
     expect(component).toContain("await disconnectHiggsfieldOAuth();");
@@ -163,9 +167,9 @@ describe("existing product UI regression boundary", () => {
     expect(component).toContain("const downloadable = filteredRecentItems.filter");
     expect(component).toContain('label: "다운로드", icon: IconDownload');
     expect(component).toContain('openLabel={`원본 결과 보기: ${item.prompt}`}');
-    expect(component).toContain('event.currentTarget.value="";if(files)chooseFallbackFolder(files);');
-    expect(component).toContain('setBatchDirectoryPermission("unsupported"); setBatchFallbackRequired(false);');
-    expect(component).toContain("if (files.length > HORIZON_MAX_FOLDER_FILES)");
+    expect(component).not.toContain("chooseFallbackFolder");
+    expect(component).not.toContain("fallbackFolderInput");
+    expect(component).toContain('setBatchDirectory(null); setBatchDirectoryPermission("unsupported");');
     expect(component).toContain('savedFiles: saved.savedFiles');
     expect(component).toContain('saveFailureCount: saved.failureCount');
     expect(component).toContain("const status = settleHorizonBatchStatus(item.status, item.ready);");
@@ -174,16 +178,16 @@ describe("existing product UI regression boundary", () => {
       component.indexOf("const chooseBatchDirectory"),
       component.indexOf("const rescanBatchDirectory"),
     );
-    expect(chooseBatchDirectory).toContain('if (!supportsHorizonDirectoryPicker()) { fallbackFolderInput.current?.click(); return; }');
+    expect(chooseBatchDirectory).toContain("if (!supportsHorizonDirectoryPicker()) {");
+    expect(chooseBatchDirectory).toContain("Chrome 또는 Edge에서 다시 열어 주세요.");
     const pickerFailure = chooseBatchDirectory.slice(chooseBatchDirectory.indexOf("} catch (error) {"));
-    expect(pickerFailure).toContain("setBatchFallbackRequired(true);");
-    expect(pickerFailure).not.toContain("fallbackFolderInput.current?.click()");
+    expect(pickerFailure).not.toContain("브라우저 방식");
     const approveBatchDirectory = component.slice(
       component.indexOf("const approveBatchDirectory"),
       component.indexOf("const startBatch"),
     );
-    expect(approveBatchDirectory).toContain("setBatchFallbackRequired(true);");
-    expect(approveBatchDirectory).not.toContain("fallbackFolderInput.current?.click()");
+    expect(approveBatchDirectory).toContain("작업을 시작할 수 없습니다");
+    expect(approveBatchDirectory).not.toContain("브라우저 다운로드 방식");
     expect(component).toContain("syncHorizonHistory(queryClient, done, scopeKey);");
     expect(component).not.toContain("const created = useRef(new Set<string>());");
     expect(component).not.toContain("void navigator.clipboard.writeText(command)");
