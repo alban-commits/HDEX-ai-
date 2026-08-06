@@ -1,5 +1,5 @@
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, scanHorizonFolder, type HorizonBatchDownload, type HorizonBatchJob } from "./horizon";
-import { createHorizonPngArtifact, createHorizonPngPsdArtifacts, horizonPngPsdFilenames, type HorizonPngArtifact, type HorizonPngPsdArtifacts } from "./horizon-restore.browser";
+import { createHorizonPngPsdArtifacts, type HorizonPngPsdArtifacts } from "./horizon-restore.browser";
 
 export type HorizonDirectoryPermission = "granted" | "denied" | "prompt";
 export const HORIZON_COMPLETED_DIRECTORY_NAME = "완성본";
@@ -342,14 +342,12 @@ export async function saveHorizonBatchPngPsd(input: {
   };
 }
 
-export async function saveHorizonBatchPng(input: {
+export async function saveHorizonBatchNative(input: {
   root: HorizonDirectoryHandle;
   results: readonly HorizonBatchDownload[];
-  maxEdge?: number;
   fetchResult?: typeof fetch;
   publicOrigin?: string;
   retryDelay?: (milliseconds: number) => Promise<void>;
-  createArtifact?: (input: { generated: Blob; filename: string; maxEdge?: number }) => Promise<HorizonPngArtifact>;
 }): Promise<{ savedFiles: string[]; savedResultCount: number; failureCount: number; failedResults: HorizonBatchDownload[] }> {
   const savedFiles: string[] = [];
   const failedResults: HorizonBatchDownload[] = [];
@@ -367,7 +365,6 @@ export async function saveHorizonBatchPng(input: {
   }
   const publicOrigin = input.publicOrigin ?? (typeof window === "undefined" ? "https://hdex.invalid" : window.location.origin);
   const fetchResult = input.fetchResult ?? fetch;
-  const createArtifact = input.createArtifact ?? createHorizonPngArtifact;
   for (const result of input.results) {
     try {
       const generated = await fetchResultBlob({
@@ -376,10 +373,8 @@ export async function saveHorizonBatchPng(input: {
         publicOrigin,
         ...(input.retryDelay ? { retryDelay: input.retryDelay } : {}),
       });
-      const artifact = generated.type.split(";", 1)[0]?.trim().toLowerCase() === "image/png"
-        ? { png: generated, pngFilename: horizonPngPsdFilenames(result.filename).png }
-        : await createArtifact({ generated, filename: result.filename, maxEdge: input.maxEdge });
-      savedFiles.push(await writeBlobFile(output, artifact.pngFilename, artifact.png));
+      const filename = filenameForImageType(result.filename, generated.type);
+      savedFiles.push(await writeBlobFile(output, filename, generated));
       savedResultCount += 1;
     } catch {
       failedResults.push(result);

@@ -10,7 +10,7 @@ import { nanoBanana2 } from "@higgsfield/fnf/jobs";
 import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
-import { ensureHorizonCompletedDirectory, HORIZON_COMPLETED_DIRECTORY_NAME, HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchPng, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
+import { ensureHorizonCompletedDirectory, HORIZON_COMPLETED_DIRECTORY_NAME, HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchNative, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { HORIZON_UPLOAD_MAX_EDGE, HORIZON_UPLOAD_TARGET_BYTES, HORIZON_UPLOAD_TARGET_PIXELS, horizonOptimizedDimensions, optimizeHorizonUploadFile, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
 import { createHorizonLayeredPsdBytes, horizonArtifactDimensions, horizonLayeredPsdFilename, HORIZON_PSD_2K_MAX_EDGE, HORIZON_PSD_4K_MAX_EDGE } from "../src/lib/horizon-restore.browser";
@@ -428,7 +428,7 @@ describe("Horizon browser directory boundary", () => {
     expect([...written.keys()]).toEqual(["상품-A.png", "상품-A.psd"]);
   });
 
-  test("writes only one PNG for every completed batch result", async () => {
+  test("writes every completed result in its generated image format", async () => {
     const written = new Map<string, Blob>();
     const output = {
       ...directoryHandle("완성본", []),
@@ -452,22 +452,16 @@ describe("Horizon browser directory boundary", () => {
       },
     } satisfies HorizonDirectoryHandle;
     const result = { url: "/api/higgsfield/result/job-png", filename: "상품-A.jpg" };
-    const saved = await saveHorizonBatchPng({
+    const saved = await saveHorizonBatchNative({
       root: rootHandle,
       results: [result],
-      maxEdge: HORIZON_PSD_2K_MAX_EDGE,
       publicOrigin: "https://hdex-ai.example",
       fetchResult: async () => new Response(new Blob(["generated"], { type: "image/jpeg" }), { headers: { "content-type": "image/jpeg" } }),
-      createArtifact: async ({ generated, filename, maxEdge }) => {
-        expect(await generated.text()).toBe("generated");
-        expect(filename).toBe("상품-A.jpg");
-        expect(maxEdge).toBe(HORIZON_PSD_2K_MAX_EDGE);
-        return { png: new Blob(["png"], { type: "image/png" }), pngFilename: "상품-A.png" };
-      },
     });
-    expect(saved).toEqual({ savedFiles: ["상품-A.png"], savedResultCount: 1, failureCount: 0, failedResults: [] });
+    expect(saved).toEqual({ savedFiles: ["상품-A.jpg"], savedResultCount: 1, failureCount: 0, failedResults: [] });
     expect(outputRequests).toEqual([{ name: HORIZON_COMPLETED_DIRECTORY_NAME, create: true }]);
-    expect([...written.keys()]).toEqual(["상품-A.png"]);
+    expect([...written.keys()]).toEqual(["상품-A.jpg"]);
+    expect(await written.get("상품-A.jpg")?.text()).toBe("generated");
   });
 
   test("writes an already validated PNG directly without browser canvas conversion", async () => {
@@ -486,20 +480,14 @@ describe("Horizon browser directory boundary", () => {
       },
     } satisfies HorizonDirectoryHandle;
     const rootHandle = { ...directoryHandle("선택한 원본 경로", []), getDirectoryHandle: async () => output } satisfies HorizonDirectoryHandle;
-    let conversionCalls = 0;
     const result = { url: "/api/higgsfield/result/job-native-png", filename: "상품-A.jpg" };
-    const saved = await saveHorizonBatchPng({
+    const saved = await saveHorizonBatchNative({
       root: rootHandle,
       results: [result],
       publicOrigin: "https://hdex-ai.example",
       fetchResult: async () => new Response(new Blob(["native-png"], { type: "image/png" }), { headers: { "content-type": "image/png" } }),
-      createArtifact: async () => {
-        conversionCalls += 1;
-        throw new Error("canvas conversion must not run for PNG");
-      },
     });
     expect(saved).toEqual({ savedFiles: ["상품-A.png"], savedResultCount: 1, failureCount: 0, failedResults: [] });
-    expect(conversionCalls).toBe(0);
     expect(await written.get("상품-A.png")?.text()).toBe("native-png");
   });
 
@@ -521,7 +509,7 @@ describe("Horizon browser directory boundary", () => {
     const rootHandle = { ...directoryHandle("선택한 원본 경로", []), getDirectoryHandle: async () => output } satisfies HorizonDirectoryHandle;
     let requests = 0;
     const delays: number[] = [];
-    const saved = await saveHorizonBatchPng({
+    const saved = await saveHorizonBatchNative({
       root: rootHandle,
       results: [{ url: "/api/higgsfield/result/job-delayed", filename: "상품-A.png" }],
       publicOrigin: "https://hdex-ai.example",
