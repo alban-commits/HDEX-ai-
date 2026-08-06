@@ -141,6 +141,12 @@ export async function requestHorizonBatchDirectoryPermission(
   return handle.requestPermission({ mode: "readwrite" });
 }
 
+export async function ensureHorizonCompletedDirectory(
+  root: HorizonDirectoryHandle,
+): Promise<HorizonDirectoryHandle> {
+  return root.getDirectoryHandle(HORIZON_COMPLETED_DIRECTORY_NAME, { create: true });
+}
+
 function withRelativePath(file: File, relativePath: string): File {
   try {
     Object.defineProperty(file, "webkitRelativePath", { configurable: true, value: relativePath });
@@ -275,23 +281,33 @@ export async function saveHorizonBatchPngPsd(input: {
   root: HorizonDirectoryHandle;
   original: Blob;
   results: readonly HorizonBatchDownload[];
+  maxEdge?: number;
   fetchResult?: typeof fetch;
   publicOrigin?: string;
-  createArtifacts?: (input: { original: Blob; generated: Blob; filename: string }) => Promise<HorizonPngPsdArtifacts>;
+  createArtifacts?: (input: { original: Blob; generated: Blob; filename: string; maxEdge?: number }) => Promise<HorizonPngPsdArtifacts>;
 }): Promise<{ savedFiles: string[]; savedResultCount: number; failureCount: number; failedResults: HorizonBatchDownload[] }> {
-  let output: HorizonDirectoryHandle | undefined;
+  let output: HorizonDirectoryHandle;
   const publicOrigin = input.publicOrigin ?? (typeof window === "undefined" ? "https://hdex.invalid" : window.location.origin);
   const createArtifacts = input.createArtifacts ?? createHorizonPngPsdArtifacts;
   const fetchResult = input.fetchResult ?? fetch;
   const savedFiles: string[] = [];
   const failedResults: HorizonBatchDownload[] = [];
   let savedResultCount = 0;
+  try {
+    output = await ensureHorizonCompletedDirectory(input.root);
+  } catch {
+    return {
+      savedFiles,
+      savedResultCount,
+      failureCount: input.results.length,
+      failedResults: [...input.results],
+    };
+  }
   for (const result of input.results) {
     const writtenForResult: string[] = [];
     try {
       const generated = await fetchResultBlob({ result, fetchResult, publicOrigin });
-      const artifacts = await createArtifacts({ original: input.original, generated, filename: result.filename });
-      output ??= await input.root.getDirectoryHandle(HORIZON_COMPLETED_DIRECTORY_NAME, { create: true });
+      const artifacts = await createArtifacts({ original: input.original, generated, filename: result.filename, maxEdge: input.maxEdge });
       writtenForResult.push(await writeBlobFile(output, artifacts.pngFilename, artifacts.png));
       writtenForResult.push(await writeBlobFile(output, artifacts.psdFilename, artifacts.psd));
       savedFiles.push(...writtenForResult);

@@ -127,6 +127,8 @@ describe("existing product UI regression boundary", () => {
     expect(component).not.toContain("PNG와 PSD를 브라우저 다운로드로 함께 저장합니다.");
     expect(component).toContain('batchDirectoryPermission!=="granted"');
     expect(component).toContain("PNG와 PSD 중 하나라도 저장되지 않으면 해당 결과를 완료로 처리하지 않습니다.");
+    expect(component).toContain("await ensureHorizonCompletedDirectory(handle);");
+    expect(component).toContain('batchSettings.engine === "nano-4k" ? HORIZON_PSD_4K_MAX_EDGE : HORIZON_PSD_2K_MAX_EDGE');
     expect(source).not.toContain("OPENAI_API_KEY 입력");
     expect(source).not.toContain("계정 드롭다운");
     expect(component).toContain("await disconnectHiggsfieldOAuth();");

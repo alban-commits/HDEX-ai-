@@ -13,7 +13,25 @@ export type HorizonPngPsdSource = {
   original: HorizonImageSource;
   generated: HorizonImageSource;
   filename: string;
+  maxEdge?: number;
 };
+
+export const HORIZON_PSD_2K_MAX_EDGE = 2_048;
+export const HORIZON_PSD_4K_MAX_EDGE = 4_096;
+
+export function horizonArtifactDimensions(
+  width: number,
+  height: number,
+  maxEdge?: number,
+): { width: number; height: number } {
+  const scale = maxEdge && maxEdge > 0
+    ? Math.min(1, maxEdge / Math.max(width, height))
+    : 1;
+  return {
+    width: Math.max(1, Math.floor(width * scale)),
+    height: Math.max(1, Math.floor(height * scale)),
+  };
+}
 
 export async function createHorizonLayeredPsdBytes(input: {
   width: number;
@@ -124,14 +142,16 @@ export async function createHorizonPngPsdArtifacts({
   original,
   generated,
   filename,
+  maxEdge,
 }: HorizonPngPsdSource): Promise<HorizonPngPsdArtifacts> {
   const [originalBitmap, generatedBitmap] = await Promise.all([
     decodeImage(original),
     decodeImage(generated),
   ]);
   try {
-    const width = generatedBitmap.width;
-    const height = generatedBitmap.height;
+    const sourceWidth = generatedBitmap.width;
+    const sourceHeight = generatedBitmap.height;
+    const { width, height } = horizonArtifactDimensions(sourceWidth, sourceHeight, maxEdge);
     if (!width || !height) throw new Error("horizon_output_dimensions_invalid");
 
     const originalCanvas = createCanvas(width, height);
