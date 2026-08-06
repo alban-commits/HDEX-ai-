@@ -470,6 +470,74 @@ describe("Horizon browser directory boundary", () => {
     expect([...written.keys()]).toEqual(["상품-A.png"]);
   });
 
+  test("writes an already validated PNG directly without browser canvas conversion", async () => {
+    const written = new Map<string, Blob>();
+    const output = {
+      ...directoryHandle("완성본", []),
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        if (!options?.create) throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+        return {
+          ...fileHandle(name),
+          createWritable: async () => ({
+            write: async (blob: Blob) => { written.set(name, blob); },
+            close: async () => undefined,
+          }),
+        };
+      },
+    } satisfies HorizonDirectoryHandle;
+    const rootHandle = { ...directoryHandle("선택한 원본 경로", []), getDirectoryHandle: async () => output } satisfies HorizonDirectoryHandle;
+    let conversionCalls = 0;
+    const result = { url: "/api/higgsfield/result/job-native-png", filename: "상품-A.jpg" };
+    const saved = await saveHorizonBatchPng({
+      root: rootHandle,
+      results: [result],
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async () => new Response(new Blob(["native-png"], { type: "image/png" }), { headers: { "content-type": "image/png" } }),
+      createArtifact: async () => {
+        conversionCalls += 1;
+        throw new Error("canvas conversion must not run for PNG");
+      },
+    });
+    expect(saved).toEqual({ savedFiles: ["상품-A.png"], savedResultCount: 1, failureCount: 0, failedResults: [] });
+    expect(conversionCalls).toBe(0);
+    expect(await written.get("상품-A.png")?.text()).toBe("native-png");
+  });
+
+  test("retries a temporarily unavailable completed result before writing its PNG", async () => {
+    const written = new Map<string, Blob>();
+    const output = {
+      ...directoryHandle("완성본", []),
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        if (!options?.create) throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+        return {
+          ...fileHandle(name),
+          createWritable: async () => ({
+            write: async (blob: Blob) => { written.set(name, blob); },
+            close: async () => undefined,
+          }),
+        };
+      },
+    } satisfies HorizonDirectoryHandle;
+    const rootHandle = { ...directoryHandle("선택한 원본 경로", []), getDirectoryHandle: async () => output } satisfies HorizonDirectoryHandle;
+    let requests = 0;
+    const delays: number[] = [];
+    const saved = await saveHorizonBatchPng({
+      root: rootHandle,
+      results: [{ url: "/api/higgsfield/result/job-delayed", filename: "상품-A.png" }],
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async () => {
+        requests += 1;
+        if (requests < 3) return Response.json({ error: "result_not_ready" }, { status: 404 });
+        return new Response(new Blob(["ready-png"], { type: "image/png" }), { headers: { "content-type": "image/png" } });
+      },
+      retryDelay: async (milliseconds) => { delays.push(milliseconds); },
+    });
+    expect(saved).toEqual({ savedFiles: ["상품-A.png"], savedResultCount: 1, failureCount: 0, failedResults: [] });
+    expect(requests).toBe(3);
+    expect(delays).toEqual([750, 1_500]);
+    expect(await written.get("상품-A.png")?.text()).toBe("ready-png");
+  });
+
   test("creates the selected root completed folder before PNG and PSD artifact work", async () => {
     let completedFolderCalls = 0;
     const rootHandle = {

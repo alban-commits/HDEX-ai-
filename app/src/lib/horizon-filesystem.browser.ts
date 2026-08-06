@@ -1,5 +1,5 @@
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, scanHorizonFolder, type HorizonBatchDownload, type HorizonBatchJob } from "./horizon";
-import { createHorizonPngArtifact, createHorizonPngPsdArtifacts, type HorizonPngArtifact, type HorizonPngPsdArtifacts } from "./horizon-restore.browser";
+import { createHorizonPngArtifact, createHorizonPngPsdArtifacts, horizonPngPsdFilenames, type HorizonPngArtifact, type HorizonPngPsdArtifacts } from "./horizon-restore.browser";
 
 export type HorizonDirectoryPermission = "granted" | "denied" | "prompt";
 export const HORIZON_COMPLETED_DIRECTORY_NAME = "완성본";
@@ -215,16 +215,33 @@ async function fetchResultBlob(input: {
   result: HorizonBatchDownload;
   fetchResult: typeof fetch;
   publicOrigin: string;
+  retryDelay?: (milliseconds: number) => Promise<void>;
 }): Promise<Blob> {
   const resultUrl = new URL(input.result.url, input.publicOrigin);
   if (resultUrl.origin !== input.publicOrigin || !resultUrl.pathname.startsWith("/api/higgsfield/result/") || resultUrl.search || resultUrl.hash) {
     throw new Error("result_url_invalid");
   }
-  const response = await input.fetchResult(`${resultUrl.pathname}`, { credentials: "include" });
-  if (!response.ok) throw new Error("result_download_failed");
-  const blob = await response.blob();
-  if (!blob.type.toLowerCase().startsWith("image/")) throw new Error("result_type_invalid");
-  return blob;
+  const retryDelay = input.retryDelay ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const delays = [0, 750, 1_500, 3_000] as const;
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    if (delays[attempt]) await retryDelay(delays[attempt]!);
+    let response: Response;
+    try {
+      response = await input.fetchResult(`${resultUrl.pathname}`, { credentials: "include", cache: "no-store" });
+    } catch {
+      if (attempt < delays.length - 1) continue;
+      throw new Error("result_download_failed");
+    }
+    if (response.ok) {
+      const blob = await response.blob();
+      if (!blob.type.toLowerCase().startsWith("image/")) throw new Error("result_type_invalid");
+      return blob;
+    }
+    const retryable = response.status === 404 || response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
+    await response.body?.cancel().catch(() => undefined);
+    if (!retryable || attempt === delays.length - 1) throw new Error("result_download_failed");
+  }
+  throw new Error("result_download_failed");
 }
 
 async function writeBlobFile(directory: HorizonDirectoryHandle, filename: string, blob: Blob): Promise<string> {
@@ -331,6 +348,7 @@ export async function saveHorizonBatchPng(input: {
   maxEdge?: number;
   fetchResult?: typeof fetch;
   publicOrigin?: string;
+  retryDelay?: (milliseconds: number) => Promise<void>;
   createArtifact?: (input: { generated: Blob; filename: string; maxEdge?: number }) => Promise<HorizonPngArtifact>;
 }): Promise<{ savedFiles: string[]; savedResultCount: number; failureCount: number; failedResults: HorizonBatchDownload[] }> {
   const savedFiles: string[] = [];
@@ -352,8 +370,15 @@ export async function saveHorizonBatchPng(input: {
   const createArtifact = input.createArtifact ?? createHorizonPngArtifact;
   for (const result of input.results) {
     try {
-      const generated = await fetchResultBlob({ result, fetchResult, publicOrigin });
-      const artifact = await createArtifact({ generated, filename: result.filename, maxEdge: input.maxEdge });
+      const generated = await fetchResultBlob({
+        result,
+        fetchResult,
+        publicOrigin,
+        ...(input.retryDelay ? { retryDelay: input.retryDelay } : {}),
+      });
+      const artifact = generated.type.split(";", 1)[0]?.trim().toLowerCase() === "image/png"
+        ? { png: generated, pngFilename: horizonPngPsdFilenames(result.filename).png }
+        : await createArtifact({ generated, filename: result.filename, maxEdge: input.maxEdge });
       savedFiles.push(await writeBlobFile(output, artifact.pngFilename, artifact.png));
       savedResultCount += 1;
     } catch {
