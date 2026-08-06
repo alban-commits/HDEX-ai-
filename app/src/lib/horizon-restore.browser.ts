@@ -9,6 +9,11 @@ export type HorizonPngPsdArtifacts = {
   psdFilename: string;
 };
 
+export type HorizonPngArtifact = {
+  png: Blob;
+  pngFilename: string;
+};
+
 export type HorizonPngPsdSource = {
   original: HorizonImageSource;
   generated: HorizonImageSource;
@@ -136,6 +141,31 @@ function canvasPng(canvas: HTMLCanvasElement): Promise<Blob> {
       else reject(new Error("horizon_png_encode_failed"));
     }, "image/png");
   });
+}
+
+export async function createHorizonPngArtifact(input: {
+  generated: HorizonImageSource;
+  filename: string;
+  maxEdge?: number;
+}): Promise<HorizonPngArtifact> {
+  const generatedBitmap = await decodeImage(input.generated);
+  try {
+    const { width, height } = horizonArtifactDimensions(
+      generatedBitmap.width,
+      generatedBitmap.height,
+      input.maxEdge,
+    );
+    const canvas = createCanvas(width, height);
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("horizon_output_canvas_unavailable");
+    context.drawImage(generatedBitmap, 0, 0, width, height);
+    return {
+      png: await canvasPng(canvas),
+      pngFilename: horizonPngPsdFilenames(input.filename).png,
+    };
+  } finally {
+    generatedBitmap.close();
+  }
 }
 
 export async function createHorizonPngPsdArtifacts({

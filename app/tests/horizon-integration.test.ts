@@ -10,7 +10,7 @@ import { nanoBanana2 } from "@higgsfield/fnf/jobs";
 import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
-import { ensureHorizonCompletedDirectory, HORIZON_COMPLETED_DIRECTORY_NAME, HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
+import { ensureHorizonCompletedDirectory, HORIZON_COMPLETED_DIRECTORY_NAME, HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchPng, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { HORIZON_UPLOAD_MAX_EDGE, HORIZON_UPLOAD_TARGET_BYTES, HORIZON_UPLOAD_TARGET_PIXELS, horizonOptimizedDimensions, optimizeHorizonUploadFile, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
 import { createHorizonLayeredPsdBytes, horizonArtifactDimensions, horizonLayeredPsdFilename, HORIZON_PSD_2K_MAX_EDGE, HORIZON_PSD_4K_MAX_EDGE } from "../src/lib/horizon-restore.browser";
@@ -426,6 +426,48 @@ describe("Horizon browser directory boundary", () => {
     expect(requested).toEqual(["/api/higgsfield/result/job-pair"]);
     expect(outputRequests).toEqual([{ name: HORIZON_COMPLETED_DIRECTORY_NAME, create: true }]);
     expect([...written.keys()]).toEqual(["상품-A.png", "상품-A.psd"]);
+  });
+
+  test("writes only one PNG for every completed batch result", async () => {
+    const written = new Map<string, Blob>();
+    const output = {
+      ...directoryHandle("완성본", []),
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        if (!options?.create) throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+        return {
+          ...fileHandle(name),
+          createWritable: async () => ({
+            write: async (blob: Blob) => { written.set(name, blob); },
+            close: async () => undefined,
+          }),
+        };
+      },
+    } satisfies HorizonDirectoryHandle;
+    const outputRequests: Array<{ name: string; create?: boolean }> = [];
+    const rootHandle = {
+      ...directoryHandle("선택한 원본 경로", []),
+      getDirectoryHandle: async (name, options) => {
+        outputRequests.push({ name, create: options?.create });
+        return output;
+      },
+    } satisfies HorizonDirectoryHandle;
+    const result = { url: "/api/higgsfield/result/job-png", filename: "상품-A.jpg" };
+    const saved = await saveHorizonBatchPng({
+      root: rootHandle,
+      results: [result],
+      maxEdge: HORIZON_PSD_2K_MAX_EDGE,
+      publicOrigin: "https://hdex-ai.example",
+      fetchResult: async () => new Response(new Blob(["generated"], { type: "image/jpeg" }), { headers: { "content-type": "image/jpeg" } }),
+      createArtifact: async ({ generated, filename, maxEdge }) => {
+        expect(await generated.text()).toBe("generated");
+        expect(filename).toBe("상품-A.jpg");
+        expect(maxEdge).toBe(HORIZON_PSD_2K_MAX_EDGE);
+        return { png: new Blob(["png"], { type: "image/png" }), pngFilename: "상품-A.png" };
+      },
+    });
+    expect(saved).toEqual({ savedFiles: ["상품-A.png"], savedResultCount: 1, failureCount: 0, failedResults: [] });
+    expect(outputRequests).toEqual([{ name: HORIZON_COMPLETED_DIRECTORY_NAME, create: true }]);
+    expect([...written.keys()]).toEqual(["상품-A.png"]);
   });
 
   test("creates the selected root completed folder before PNG and PSD artifact work", async () => {

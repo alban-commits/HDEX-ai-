@@ -114,7 +114,7 @@ describe("existing product UI regression boundary", () => {
       "여러 장 선택", "한 번에 여러 장 또는 반복해서 계속 추가",
       "폴더에서 이 카드로 드래그앤드롭 가능",
       "대량 생성 폴더 선택", "다시 스캔", "다른 폴더 선택", "폴더 권한 다시 승인",
-      "선택한 원본 경로", "전체 작업 폴더", "전체 PNG+PSD 완성본에 다시 저장",
+      "선택한 원본 경로", "전체 작업 폴더", "전체 PNG 완성본에 다시 저장",
       "상품별 폴더에 1.jpg부터 번호를 붙여 넣으세요. 같은 역할의 참고 이미지가 여러 장이면 3-1.jpg, 3-2.jpg 또는 4-1.jpg, 4-2.jpg처럼 정리한 뒤 상위 폴더를 선택하세요.",
       "같은 기본 번호의 하위 번호 이미지는 하나의 제품 역할로 함께 참고합니다.",
       "생성할 상품 폴더가 없습니다. 각 상품 폴더에 1.jpg가 필요합니다.",
@@ -126,7 +126,11 @@ describe("existing product UI regression boundary", () => {
     expect(component).not.toContain("브라우저 방식으로 폴더 선택");
     expect(component).not.toContain("PNG와 PSD를 브라우저 다운로드로 함께 저장합니다.");
     expect(component).toContain('batchDirectoryPermission!=="granted"');
-    expect(component).toContain("PNG와 PSD 중 하나라도 저장되지 않으면 해당 결과를 완료로 처리하지 않습니다.");
+    expect(component).toContain("PNG가 저장되지 않으면 해당 결과를 완료로 처리하지 않습니다.");
+    expect(component).toContain("saveHorizonBatchPng");
+    expect(component).not.toContain("saveHorizonBatchPngPsd");
+    expect(component).not.toContain("PNG+PSD");
+    expect(component).not.toContain("2레이어 PSD");
     expect(component).toContain("await ensureHorizonCompletedDirectory(handle);");
     expect(component).toContain('batchSettings.engine === "nano-4k" ? HORIZON_PSD_4K_MAX_EDGE : HORIZON_PSD_2K_MAX_EDGE');
     expect(source).not.toContain("OPENAI_API_KEY 입력");

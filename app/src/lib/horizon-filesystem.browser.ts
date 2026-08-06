@@ -1,5 +1,5 @@
 import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, scanHorizonFolder, type HorizonBatchDownload, type HorizonBatchJob } from "./horizon";
-import { createHorizonPngPsdArtifacts, type HorizonPngPsdArtifacts } from "./horizon-restore.browser";
+import { createHorizonPngArtifact, createHorizonPngPsdArtifacts, type HorizonPngArtifact, type HorizonPngPsdArtifacts } from "./horizon-restore.browser";
 
 export type HorizonDirectoryPermission = "granted" | "denied" | "prompt";
 export const HORIZON_COMPLETED_DIRECTORY_NAME = "완성본";
@@ -314,6 +314,49 @@ export async function saveHorizonBatchPngPsd(input: {
       savedResultCount += 1;
     } catch {
       for (const filename of writtenForResult) await output?.removeEntry?.(filename).catch(() => undefined);
+      failedResults.push(result);
+    }
+  }
+  return {
+    savedFiles,
+    savedResultCount,
+    failureCount: failedResults.length,
+    failedResults,
+  };
+}
+
+export async function saveHorizonBatchPng(input: {
+  root: HorizonDirectoryHandle;
+  results: readonly HorizonBatchDownload[];
+  maxEdge?: number;
+  fetchResult?: typeof fetch;
+  publicOrigin?: string;
+  createArtifact?: (input: { generated: Blob; filename: string; maxEdge?: number }) => Promise<HorizonPngArtifact>;
+}): Promise<{ savedFiles: string[]; savedResultCount: number; failureCount: number; failedResults: HorizonBatchDownload[] }> {
+  const savedFiles: string[] = [];
+  const failedResults: HorizonBatchDownload[] = [];
+  let savedResultCount = 0;
+  let output: HorizonDirectoryHandle;
+  try {
+    output = await ensureHorizonCompletedDirectory(input.root);
+  } catch {
+    return {
+      savedFiles,
+      savedResultCount,
+      failureCount: input.results.length,
+      failedResults: [...input.results],
+    };
+  }
+  const publicOrigin = input.publicOrigin ?? (typeof window === "undefined" ? "https://hdex.invalid" : window.location.origin);
+  const fetchResult = input.fetchResult ?? fetch;
+  const createArtifact = input.createArtifact ?? createHorizonPngArtifact;
+  for (const result of input.results) {
+    try {
+      const generated = await fetchResultBlob({ result, fetchResult, publicOrigin });
+      const artifact = await createArtifact({ generated, filename: result.filename, maxEdge: input.maxEdge });
+      savedFiles.push(await writeBlobFile(output, artifact.pngFilename, artifact.png));
+      savedResultCount += 1;
+    } catch {
       failedResults.push(result);
     }
   }
