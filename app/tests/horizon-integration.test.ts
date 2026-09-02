@@ -772,8 +772,8 @@ describe("Horizon browser mutation boundaries", () => {
 });
 
 describe("Horizon prompt contract", () => {
-  test("preserves the V10 schema, hierarchy, grouped references, and golden compiled sections", () => {
-    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v10-terra");
+  test("preserves the V11 schema, hierarchy, grouped references, lighting integration, and golden compiled sections", () => {
+    expect(HORIZON_PROMPT_VERSION).toBe("fashion-auto-numbering-multi-reference-v11-terra-light-integration");
     expect(HORIZON_OPENAI_TIMEOUT_MS).toBe(180_000);
     expect(HORIZON_PROMPT_IMAGE_MAX_EDGE).toBe(2_048);
     expect(promptSchema().required).toHaveLength(16);
@@ -791,8 +791,17 @@ describe("Horizon prompt contract", () => {
     expect(prompt).toContain("Footwear must remain behind or underneath any referenced long trouser hem");
     expect(prompt).toContain("AUTHORIZED REPLACEMENTS: upper garment only; lower garment only; shoes only");
     expect(prompt).toContain("original base socks or bare-ankle state exactly");
+    expect(prompt).toContain("BACKGROUND, COLOR & LIGHTING SOURCE LOCK: Use the MODEL image as the sole source of truth");
+    expect(prompt).toContain("SCENE LIGHT TRANSFER TO EVERY REPLACED PRODUCT: Relight every authorized garment and wearable");
+    expect(prompt).toContain("material-appropriate specular highlights, fabric self-shadowing, folds, tension, body-contact shadows, ambient occlusion, overlap shadows");
+    expect(prompt).toContain("Product references control intrinsic product color, material, construction, fit, and details only; ignore their photography, exposure, white balance");
+    expect(prompt).toContain("Reject pasted-on clothing, flat garment lighting, mismatched light direction or color temperature");
+    expect(prompt).toContain("never like clothing was pasted, overlaid, or composited afterward");
     expect(prompt).toContain("FINAL OUTPUT: One centered subject only. 2:3 aspect ratio.");
-    expect(buildCodexPrompt("M1 W1 A1","2:3","front",images)).toContain("USER BRIEF: M1 W1 A1");
+    const codexPrompt = buildCodexPrompt("M1 W1 A1","2:3","front",images);
+    expect(codexPrompt).toContain("USER BRIEF: M1 W1 A1");
+    expect(codexPrompt).toContain("Treat the MODEL image as the only lighting and color-environment source");
+    expect(codexPrompt).toContain("Every replaced garment and wearable must be relit as if it was physically present when the MODEL photograph was captured");
     const groupedPrompt = buildCodexPrompt("AUTO MODE","2:3","front",[
       {category:"M1 · 모델 기준"},
       {category:"W2-1 · 상의 디테일"},
