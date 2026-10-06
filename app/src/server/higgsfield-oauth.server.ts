@@ -389,7 +389,10 @@ export async function beginHiggsfieldOAuth(
   );
   authorization.searchParams.set("code_challenge_method", "S256");
   authorization.searchParams.set("resource", config.mcpUrl);
-  if (selectAccount) authorization.searchParams.set("prompt", "select_account");
+  if (selectAccount) {
+    authorization.searchParams.set("prompt", "select_account consent");
+    authorization.searchParams.set("max_age", "0");
+  }
   return {
     authorizationUrl: authorization.toString(),
     stateCookie: sealCookie(

@@ -402,7 +402,8 @@ describe("Higgsfield OAuth security contract", () => {
     const authorization = new URL(response.headers.get("location")!);
     expect(discoveryCalls).toBeGreaterThan(0);
     expect(authorization.origin).toBe("https://auth.higgsfield.ai");
-    expect(authorization.searchParams.get("prompt")).toBe("select_account");
+    expect(authorization.searchParams.get("prompt")).toBe("select_account consent");
+    expect(authorization.searchParams.get("max_age")).toBe("0");
     expect(response.headers.get("set-cookie")).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
   });
 
