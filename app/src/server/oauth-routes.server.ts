@@ -37,6 +37,14 @@ export type ActiveOAuthSession = {
   rotatedCookies?: HiggsfieldOAuthCookieValues;
 };
 
+const HIGGSFIELD_ACCOUNT_CHOOSER_URL = "https://accounts.higgsfield.ai/sign-in/choose";
+
+function higgsfieldAccountChooserUrl(authorizationUrl: string): string {
+  const chooser = new URL(HIGGSFIELD_ACCOUNT_CHOOSER_URL);
+  chooser.searchParams.set("redirect_url", authorizationUrl);
+  return chooser.toString();
+}
+
 export function readOAuthCookies(request: Request): HiggsfieldOAuthCookieBundle {
   return {
     session: readCookie(request, HIGGSFIELD_OAUTH_SESSION_COOKIE),
@@ -159,7 +167,11 @@ export async function handleOAuthConnect(
       returnPath,
       changeAccount,
     );
-    const response = redirectNoStore(started.authorizationUrl);
+    const response = redirectNoStore(
+      changeAccount
+        ? higgsfieldAccountChooserUrl(started.authorizationUrl)
+        : started.authorizationUrl,
+    );
     appendSealedCookie(response.headers, HIGGSFIELD_OAUTH_STATE_COOKIE, started.stateCookie, {
       path: "/api/higgsfield/oauth",
       maxAge: HIGGSFIELD_OAUTH_STATE_TTL_SECONDS,

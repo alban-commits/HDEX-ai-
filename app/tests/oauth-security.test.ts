@@ -399,7 +399,10 @@ describe("Higgsfield OAuth security contract", () => {
         now: NOW,
       },
     );
-    const authorization = new URL(response.headers.get("location")!);
+    const chooser = new URL(response.headers.get("location")!);
+    expect(chooser.origin).toBe("https://accounts.higgsfield.ai");
+    expect(chooser.pathname).toBe("/sign-in/choose");
+    const authorization = new URL(chooser.searchParams.get("redirect_url")!);
     expect(discoveryCalls).toBeGreaterThan(0);
     expect(authorization.origin).toBe("https://auth.higgsfield.ai");
     expect(authorization.searchParams.get("prompt")).toBe("select_account consent");
