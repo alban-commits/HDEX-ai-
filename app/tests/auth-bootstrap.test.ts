@@ -74,7 +74,7 @@ test("sends only guests through the app auth route", () => {
     "/api/higgsfield/oauth/connect?return=%2F",
   );
   expect(getReconnectSignInUrl("/presets?tab=history")).toBe(
-    "/api/higgsfield/oauth/connect?return=%2Fpresets%3Ftab%3Dhistory",
+    "/api/higgsfield/oauth/connect?return=%2Fpresets%3Ftab%3Dhistory&account=change",
   );
 });
 

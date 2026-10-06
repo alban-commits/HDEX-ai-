@@ -159,7 +159,7 @@ export function getSignInUrl(scopeKey: string, returnPath: string): string | nul
 export function getReconnectSignInUrl(returnPath: string): string {
   const safeReturnPath =
     returnPath.startsWith("/") && !returnPath.startsWith("//") ? returnPath : "/";
-  return `/api/higgsfield/oauth/connect?return=${encodeURIComponent(safeReturnPath)}`;
+  return `/api/higgsfield/oauth/connect?return=${encodeURIComponent(safeReturnPath)}&account=change`;
 }
 
 type UploadResponse =

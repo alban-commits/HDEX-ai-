@@ -382,6 +382,30 @@ describe("Higgsfield OAuth security contract", () => {
     expect(response.headers.get("set-cookie")).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
   });
 
+  test("forces the provider account chooser when changing a connected account", async () => {
+    const { cookies } = await connectedCookies();
+    let discoveryCalls = 0;
+    const response = await handleOAuthConnect(
+      new Request(
+        `${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=/presets&account=change`,
+        { headers: { cookie: cookieHeader(cookies) } },
+      ),
+      {
+        env,
+        fetchImpl: async (...args) => {
+          discoveryCalls += 1;
+          return discoveryFetch()(...args);
+        },
+        now: NOW,
+      },
+    );
+    const authorization = new URL(response.headers.get("location")!);
+    expect(discoveryCalls).toBeGreaterThan(0);
+    expect(authorization.origin).toBe("https://auth.higgsfield.ai");
+    expect(authorization.searchParams.get("prompt")).toBe("select_account");
+    expect(response.headers.get("set-cookie")).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
+  });
+
   test("rejects a late callback without deleting the newer pending state", async () => {
     const first = await handleOAuthConnect(
       new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=/presets`),

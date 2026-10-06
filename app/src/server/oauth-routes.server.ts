@@ -133,26 +133,31 @@ export async function handleOAuthConnect(
   const crossSite = rejectCrossSiteMutation(request, config.publicOrigin);
   if (crossSite) return crossSite;
   try {
+    const requestUrl = new URL(request.url);
     const returnPath = safeOAuthReturnPath(
-      new URL(request.url).searchParams.get("return") ?? "/",
+      requestUrl.searchParams.get("return") ?? "/",
     );
+    const changeAccount = requestUrl.searchParams.get("account") === "change";
     const original = readOAuthCookies(request);
-    const status = await getHiggsfieldOAuthStatus({
-      config,
-      sessionCookies: original,
-      fetchImpl: options.fetchImpl,
-      now: options.now,
-    });
-    if (status.connected) {
-      const response = oauthRedirect(config, returnPath, "connected");
-      if (status.sessionCookies) appendOAuthSessionCookies(response.headers, status.sessionCookies);
-      return response;
+    if (!changeAccount) {
+      const status = await getHiggsfieldOAuthStatus({
+        config,
+        sessionCookies: original,
+        fetchImpl: options.fetchImpl,
+        now: options.now,
+      });
+      if (status.connected) {
+        const response = oauthRedirect(config, returnPath, "connected");
+        if (status.sessionCookies) appendOAuthSessionCookies(response.headers, status.sessionCookies);
+        return response;
+      }
     }
     const started = await beginHiggsfieldOAuth(
       config,
       options.fetchImpl,
       options.now,
       returnPath,
+      changeAccount,
     );
     const response = redirectNoStore(started.authorizationUrl);
     appendSealedCookie(response.headers, HIGGSFIELD_OAUTH_STATE_COOKIE, started.stateCookie, {

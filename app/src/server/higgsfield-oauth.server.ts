@@ -371,6 +371,7 @@ export async function beginHiggsfieldOAuth(
   fetchImpl: typeof fetch = fetch,
   now = Date.now(),
   returnPath = "/",
+  selectAccount = false,
 ): Promise<{ authorizationUrl: string; stateCookie: string }> {
   const metadata = await discoverOAuthMetadata(config, fetchImpl);
   const clientId = await registerClient(metadata, config, fetchImpl);
@@ -388,6 +389,7 @@ export async function beginHiggsfieldOAuth(
   );
   authorization.searchParams.set("code_challenge_method", "S256");
   authorization.searchParams.set("resource", config.mcpUrl);
+  if (selectAccount) authorization.searchParams.set("prompt", "select_account");
   return {
     authorizationUrl: authorization.toString(),
     stateCookie: sealCookie(
