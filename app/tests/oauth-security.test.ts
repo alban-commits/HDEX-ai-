@@ -248,7 +248,7 @@ describe("Higgsfield OAuth security contract", () => {
         method: "DELETE",
         headers: { origin: PUBLIC_ORIGIN, cookie: cookieHeader(first.cookies) },
       }),
-      { env, clearRuntime: (fingerprint) => { cleared.push(fingerprint); } },
+      { env, clearRuntime: (fingerprint) => { cleared.push(fingerprint); }, now: NOW + 1_000 },
     );
     expect(response.status).toBe(200);
     expect(cleared).toEqual([firstFingerprint]);

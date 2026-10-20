@@ -294,13 +294,14 @@ export async function handleOAuthDisconnect(
   options: {
     env?: NodeJS.ProcessEnv;
     clearRuntime?: (fingerprint: string) => void | Promise<void>;
+    now?: number;
   } = {},
 ): Promise<Response> {
   const config = getHiggsfieldOAuthConfig(options.env);
   if (config) {
     const crossSite = rejectCrossSiteMutation(request, config.publicOrigin);
     if (crossSite) return crossSite;
-    const session = readHiggsfieldOAuthSession(config, readOAuthCookies(request));
+    const session = readHiggsfieldOAuthSession(config, readOAuthCookies(request), options.now);
     if (session && options.clearRuntime) {
       await options.clearRuntime(higgsfieldOAuthSessionFingerprint(session));
     }
