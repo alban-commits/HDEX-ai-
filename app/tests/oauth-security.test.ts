@@ -382,7 +382,7 @@ describe("Higgsfield OAuth security contract", () => {
     expect(response.headers.get("set-cookie")).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
   });
 
-  test("forces the provider account chooser when changing a connected account", async () => {
+  test("forces direct provider reauthentication when changing a connected account", async () => {
     const { cookies } = await connectedCookies();
     let discoveryCalls = 0;
     const response = await handleOAuthConnect(
@@ -399,13 +399,10 @@ describe("Higgsfield OAuth security contract", () => {
         now: NOW,
       },
     );
-    const chooser = new URL(response.headers.get("location")!);
-    expect(chooser.origin).toBe("https://accounts.higgsfield.ai");
-    expect(chooser.pathname).toBe("/sign-in/choose");
-    const authorization = new URL(chooser.searchParams.get("redirect_url")!);
+    const authorization = new URL(response.headers.get("location")!);
     expect(discoveryCalls).toBeGreaterThan(0);
     expect(authorization.origin).toBe("https://auth.higgsfield.ai");
-    expect(authorization.searchParams.get("prompt")).toBe("select_account consent");
+    expect(authorization.searchParams.get("prompt")).toBe("login consent");
     expect(authorization.searchParams.get("max_age")).toBe("0");
     expect(response.headers.get("set-cookie")).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
   });
