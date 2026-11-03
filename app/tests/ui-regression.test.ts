@@ -153,6 +153,7 @@ describe("existing product UI regression boundary", () => {
     expect(component).toContain('title="현재 연결을 끊고 다른 Higgsfield 계정으로 로그인"');
     expect(component).toContain('title="이 브라우저의 Higgsfield 연결만 해제"');
     expect(component).toContain('accountAction==="reconnect"?"계정 변경 중…":"계정 변경"');
+    expect(component).toContain('accountEmail??"연결된 Higgsfield 계정"');
     expect(component).toContain('accountAction==="disconnect"?"연결 해제 중…":"연결 해제"');
     expect(styles).toContain(".hz-auth-button:hover:not(:disabled)");
     expect(styles).toContain(".hz-auth-button:focus-visible");

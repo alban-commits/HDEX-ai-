@@ -39,6 +39,7 @@ const env = {
 function discoveryFetch(options: {
   token?: Record<string, unknown>;
   tokenHook?: (body: URLSearchParams) => Promise<Response> | Response;
+  userInfo?: Record<string, unknown>;
 } = {}): typeof fetch {
   return async (input, init) => {
     const url = new URL(String(input));
@@ -63,6 +64,7 @@ function discoveryFetch(options: {
         authorization_endpoint: "https://auth.higgsfield.ai/authorize",
         token_endpoint: "https://auth.higgsfield.ai/token",
         registration_endpoint: "https://auth.higgsfield.ai/register",
+        userinfo_endpoint: "https://auth.higgsfield.ai/userinfo",
         code_challenge_methods_supported: ["S256"],
         scopes_supported: ["openid", "email", "offline_access"],
       });
@@ -84,6 +86,10 @@ function discoveryFetch(options: {
           expires_in: 3_600,
         },
       );
+    }
+    if (url.pathname === "/userinfo") {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer personal-access-token");
+      return Response.json(options.userInfo ?? { email: "account@example.com" });
     }
     throw new Error(`unexpected mock URL: ${url}`);
   };
@@ -296,6 +302,7 @@ describe("Higgsfield OAuth security contract", () => {
       available: true,
       connected: true,
       transport: "mcp_oauth",
+      account: { email: "account@example.com" },
     });
     expect(statusText).not.toMatch(/access-token|refresh-token|dynamic-client-id/);
 

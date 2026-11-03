@@ -129,7 +129,7 @@ export const fnfBrowserAdapter: FnfAdapter = {
   switchWorkspace: (data) => adapterCall("switchWorkspace", data),
 };
 
-type CurrentUser = { id: string; workspaceId?: string | null };
+export type CurrentUser = { id: string; workspaceId?: string | null; accountEmail?: string };
 export const GUEST_SCOPE_KEY = "guest";
 
 export async function fetchCurrentUser(): Promise<CurrentUser | null> {

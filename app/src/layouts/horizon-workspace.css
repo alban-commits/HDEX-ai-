@@ -155,6 +155,13 @@
   font-size: 10px;
   line-height: 1.5;
 }
+.hz-account-card .hz-account-email {
+  margin-bottom: 3px;
+  color: var(--hz-accent);
+  font-size: 11px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
 .hz-auth-button,
 .hz-account-state {
   flex: 0 0 auto;

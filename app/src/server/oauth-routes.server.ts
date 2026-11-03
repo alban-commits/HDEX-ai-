@@ -281,6 +281,9 @@ export async function handleOAuthStatus(
       available: true,
       connected: true,
       transport: "mcp_oauth",
+      ...(typeof session.accountEmail === "string"
+        ? { account: { email: session.accountEmail } }
+        : {}),
       ...(options.capabilitySummary
         ? { capability: options.capabilitySummary(fingerprint, options.now) }
         : {}),
