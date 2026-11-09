@@ -2271,6 +2271,38 @@ describe("Higgsfield MCP discovery boundary", () => {
     clearHiggsfieldRuntime(fingerprint);
   });
 
+  test("sends the conditional header required by current Higgsfield MCP upload URLs", async () => {
+    const fingerprint = "upload-if-none-match";
+    await seed(fingerprint);
+    let sentHeaders = new Headers();
+    await uploadHiggsfieldImage({
+      session,
+      fingerprint,
+      filename: "pose.png",
+      contentType: "image/png",
+      bytes: new Uint8Array([137, 80, 78, 71]),
+      callTool: async (name) => name === "media_upload"
+        ? {
+            uploads: [{
+              media_id: "conditional-media",
+              upload_url: "https://upload.higgsfield.ai/put?X-Amz-SignedHeaders=content-type%3Bhost%3Bif-none-match",
+              method: "PUT",
+              content_type: "image/png",
+            }],
+          }
+        : { results: [{ media_id: "conditional-media", status: "confirmed" }] },
+      uploadFetch: async (_url, init) => {
+        sentHeaders = new Headers(init?.headers);
+        return new Response(null, { status: 200 });
+      },
+      env: GENERATION_ENV,
+    });
+    expect(sentHeaders.get("content-type")).toBe("image/png");
+    expect(sentHeaders.get("if-none-match")).toBe("*");
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
   test("clears sealed cookies, capability cache, and generation TTL state after MCP 401/403", async () => {
     const fingerprint = "authentication-failure-session";
     await seed(fingerprint);

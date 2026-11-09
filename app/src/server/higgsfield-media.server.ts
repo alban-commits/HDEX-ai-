@@ -32,6 +32,27 @@ function safeUploadContentType(value: unknown): "image/jpeg" | "image/png" | nul
   return normalized === "image/png" ? "image/png" : null;
 }
 
+function signedUploadHeaders(
+  uploadUrl: string,
+  contentType: "image/jpeg" | "image/png",
+): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": contentType };
+  const url = new URL(uploadUrl);
+  const signedHeadersEntry = [...url.searchParams.entries()].find(
+    ([key]) => key.toLowerCase() === "x-amz-signedheaders",
+  );
+  const signedHeaders = new Set(
+    (signedHeadersEntry?.[1] ?? "")
+      .split(";")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  // Higgsfield's current MCP upload reservation signs this conditional header.
+  // Omitting it makes the storage PUT fail even though media_upload succeeded.
+  if (signedHeaders.has("if-none-match")) headers["If-None-Match"] = "*";
+  return headers;
+}
+
 export async function uploadHiggsfieldImage(input: {
   session: HiggsfieldOAuthSession;
   fingerprint: string;
@@ -76,6 +97,7 @@ export async function uploadHiggsfieldImage(input: {
       status: 502,
     });
   }
+  const uploadHeaders = signedUploadHeaders(uploadUrl, uploadContentType);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
@@ -83,7 +105,7 @@ export async function uploadHiggsfieldImage(input: {
     if (input.uploadFetch) {
       const response = await input.uploadFetch(uploadUrl, {
         method: "PUT",
-        headers: { "Content-Type": uploadContentType },
+        headers: uploadHeaders,
         body: new Blob([input.bytes as BlobPart], { type: uploadContentType }),
         redirect: "error",
         signal: controller.signal,
@@ -99,7 +121,7 @@ export async function uploadHiggsfieldImage(input: {
       const response = await requestPinnedHttps({
         url: uploadUrl,
         method: "PUT",
-        headers: { "Content-Type": uploadContentType },
+        headers: uploadHeaders,
         body: input.bytes,
         maxResponseBytes: MAX_UPLOAD_RESPONSE_BYTES,
         signal: controller.signal,
