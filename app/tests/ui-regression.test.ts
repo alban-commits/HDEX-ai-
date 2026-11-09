@@ -20,6 +20,14 @@ describe("existing product UI regression boundary", () => {
       .replace("  removeGenerationQueries,\n", "")
       .replace("  disconnectHiggsfieldOAuth,\n", "")
       .replace(
+        "  stageLocalPoseAsset,\n  subscribeHiggsfieldReconnect,\n",
+        "  subscribeHiggsfieldReconnect,\n  uploadAsset,\n",
+      )
+      .replace(
+        "const selected = stageLocalPoseAsset(file);",
+        "const selected = await uploadAsset(file);",
+      )
+      .replace(
         /import \{\n {2}GUEST_SCOPE_KEY,[\s\S]*? {2}uploadAsset,\n\} from "@\/lib\/fnf\.browser";/,
         'import { GUEST_SCOPE_KEY, getSignInUrl, PRESET_JOBS, uploadAsset } from "@/lib/fnf.browser";',
       )

@@ -3,6 +3,7 @@ import type { MediaRef } from "@higgsfield/fnf/media";
 import { errorFromJSON } from "@higgsfield/fnf/errors";
 import { gptImage2, nanoBanana2, soulV2Image } from "@higgsfield/fnf/jobs";
 import type { AssetSelection } from "@/components/asset-library";
+import { MAX_UPLOAD_BYTES } from "./upload-request-security";
 import { fetchAppJson } from "./app-api-response.browser";
 
 export const PRESET_JOBS = [soulV2Image, gptImage2, nanoBanana2] as const;
@@ -206,6 +207,33 @@ function rememberLocalUpload(mediaId: string, file: File, objectUrl: string): vo
     if (!oldest) break;
     releaseLocalUpload(oldest);
   }
+}
+
+/** Keep an influencer pose in this browser for GPT analysis only. */
+export function stageLocalPoseAsset(file: File): AssetSelection {
+  if (file.type !== "image/jpeg" && file.type !== "image/png") {
+    throw errorFromJSON({
+      code: "invalid_file_type",
+      message: "JPG 또는 PNG 이미지만 선택할 수 있습니다.",
+      status: 415,
+    });
+  }
+  if (file.size === 0 || file.size > MAX_UPLOAD_BYTES) {
+    throw errorFromJSON({
+      code: "file_too_large",
+      message: "이미지는 20MB 이하여야 합니다.",
+      status: 413,
+    });
+  }
+  const mediaId = `local-pose-${crypto.randomUUID()}`;
+  const objectUrl = URL.createObjectURL(file);
+  rememberLocalUpload(mediaId, file, objectUrl);
+  return {
+    name: file.name,
+    type: file.type,
+    src: objectUrl,
+    ref: { id: mediaId, type: "media_input" },
+  };
 }
 
 export async function uploadAsset(file: File): Promise<AssetSelection> {

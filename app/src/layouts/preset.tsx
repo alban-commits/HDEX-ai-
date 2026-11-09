@@ -41,8 +41,8 @@ import {
   PRESET_JOBS,
   releaseAllLocalUploads,
   releaseLocalUpload,
+  stageLocalPoseAsset,
   subscribeHiggsfieldReconnect,
-  uploadAsset,
 } from "@/lib/fnf.browser";
 import { composeInfluencerProfile } from "@/lib/profile.browser";
 import { savePreferences } from "@/lib/preferences.functions";
@@ -274,7 +274,7 @@ export function PresetTemplate() {
   }, [pose]);
 
   const handleUpload = useCallback(async (file: File) => {
-    const selected = await uploadAsset(file);
+    const selected = stageLocalPoseAsset(file);
     const item = { ...selected, kind: "upload" as const, personal: true };
     setUploads((current) => [item, ...current.filter((entry) => entry.ref?.id !== item.ref?.id)]);
     selectPose(selected);

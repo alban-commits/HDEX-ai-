@@ -9,6 +9,7 @@ import {
   GUEST_SCOPE_KEY,
   releaseAllLocalUploads,
   releaseLocalUpload,
+  stageLocalPoseAsset,
   subscribeHiggsfieldReconnect,
   uploadAsset,
 } from "../src/lib/fnf.browser";
@@ -117,6 +118,27 @@ test("normalizes uploaded image refs before they reach generation input", async 
       },
     });
     expect(asset.src.startsWith("blob:")).toBe(true);
+    expect(getLocalUploadFile(asset.ref!.id)).toBe(file);
+  } finally {
+    releaseAllLocalUploads();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("keeps influencer pose files local until GPT prompt analysis", () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("local pose staging must not call Higgsfield upload");
+  };
+
+  try {
+    const file = new File(["pose"], "pose.jpg", { type: "image/jpeg" });
+    const asset = stageLocalPoseAsset(file);
+    expect(fetchCalls).toBe(0);
+    expect(asset.ref).toMatchObject({ type: "media_input" });
+    expect(asset.ref?.id).toStartWith("local-pose-");
     expect(getLocalUploadFile(asset.ref!.id)).toBe(file);
   } finally {
     releaseAllLocalUploads();
