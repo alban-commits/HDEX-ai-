@@ -53,6 +53,7 @@ export async function composeInfluencerProfile(input: { data: ProfileRequest }) 
       body: form,
     },
     isEnvelope: isProfileResponse,
+    allowHeaderlessEnvelope: true,
   });
   if (!body.ok && body.code === "oauth_required") {
     notifyHiggsfieldReconnectRequired();

@@ -89,7 +89,7 @@ test("mints a fresh single-use confirmation token for every explicit submit", as
   expect(second).not.toBe(first);
 });
 
-test("normalizes uploaded image refs before they reach generation input", async () => {
+test("accepts a strict upload response when the proxy strips its app header", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     expect(input).toBe("/api/media/upload");
@@ -99,7 +99,7 @@ test("normalizes uploaded image refs before they reach generation input", async 
     const headers = new Headers(init?.headers);
     expect(headers.get("accept")).toBe("application/json");
     expect(headers.get("content-type")).toBeNull();
-    return appJson({
+    return Response.json({
       ok: true,
       ref: {
         id: "97cf1fec-77a9-4627-a3d4-23a09ea8aaa4",

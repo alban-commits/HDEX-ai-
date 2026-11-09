@@ -96,6 +96,7 @@ export async function disconnectHiggsfieldOAuth(): Promise<void> {
     path: "/api/higgsfield/oauth/disconnect",
     init: { method: "DELETE", credentials: "include" },
     isEnvelope: isHiggsfieldDisconnectResponse,
+    allowHeaderlessEnvelope: true,
   });
 }
 
@@ -109,7 +110,7 @@ async function adapterCall(operation: string, data: object = {}): Promise<unknow
       body: JSON.stringify({ operation, data }),
     },
     isEnvelope: isAdapterResponse,
-    allowHeaderlessAdapterEnvelope: true,
+    allowHeaderlessEnvelope: true,
   });
   if (!result.ok) throwAdapterError(result.error);
   return result.value;
@@ -173,6 +174,8 @@ type UploadResponse =
 
 function isUploadResponse(value: unknown, status: number): value is UploadResponse {
   if (!isRecord(value) || typeof value.ok !== "boolean") return false;
+  const allowedKeys = value.ok ? new Set(["ok", "ref"]) : new Set(["ok", "error"]);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (!value.ok) return isApiError(value.error);
   return (
     status >= 200 &&
@@ -247,6 +250,7 @@ export async function uploadAsset(file: File): Promise<AssetSelection> {
     path: "/api/media/upload",
     init: { method: "POST", credentials: "include", body: form },
     isEnvelope: isUploadResponse,
+    allowHeaderlessEnvelope: true,
   });
   if (!body.ok) throwAdapterError(body.error);
   const objectUrl = URL.createObjectURL(file);
