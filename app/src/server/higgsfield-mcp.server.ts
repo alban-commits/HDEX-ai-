@@ -130,9 +130,6 @@ type CapabilityCacheEntry = { value: HiggsfieldCapabilityRecord; expiresAt: numb
 const capabilityCache = new Map<string, CapabilityCacheEntry>();
 const inspectionFlights = new Map<string, Promise<HiggsfieldCapabilityRecord>>();
 const capabilityEpochs = new Map<string, number>();
-const verifiedSessionCache = new Map<string, number>();
-const verificationFlights = new Map<string, Promise<void>>();
-const HIGGSFIELD_SESSION_VERIFICATION_TTL_MS = 10 * 60 * 1_000;
 
 export class HiggsfieldMcpError extends Error {
   constructor(
@@ -1270,59 +1267,6 @@ export function clearHiggsfieldRuntime(sessionFingerprint: string): void {
   capabilityEpochs.set(sessionFingerprint, (capabilityEpochs.get(sessionFingerprint) ?? 0) + 1);
   capabilityCache.delete(sessionFingerprint);
   inspectionFlights.delete(sessionFingerprint);
-  verifiedSessionCache.delete(sessionFingerprint);
-  verificationFlights.delete(sessionFingerprint);
-}
-
-export async function verifyHiggsfieldMcpSession(input: {
-  sessionFingerprint: string;
-  mcpUrl: string;
-  accessToken: string;
-  fetchImpl?: typeof fetch;
-  now?: number;
-}): Promise<void> {
-  const now = input.now ?? Date.now();
-  if ((verifiedSessionCache.get(input.sessionFingerprint) ?? 0) > now) return;
-  const existing = verificationFlights.get(input.sessionFingerprint);
-  if (existing) return existing;
-  const promise = withOfficialMcpClient({
-    mcpUrl: input.mcpUrl,
-    accessToken: input.accessToken,
-    fetchImpl: input.fetchImpl,
-    operation: async (client, signal) => {
-      const required = new Set([
-        "media_upload",
-        "media_confirm",
-        "generate_image",
-        "jobs_wait",
-      ]);
-      let cursor: string | undefined;
-      for (let page = 0; page < HIGGSFIELD_MCP_MAX_PAGES && required.size > 0; page += 1) {
-        const result = await client.listTools(cursor ? { cursor } : undefined, {
-          signal,
-          timeout: HIGGSFIELD_MCP_TIMEOUT_MS,
-          maxTotalTimeout: HIGGSFIELD_MCP_TIMEOUT_MS,
-        });
-        for (const tool of result.tools) required.delete(tool.name);
-        if (!result.nextCursor) break;
-        cursor = result.nextCursor;
-      }
-      if (required.size > 0) throw new HiggsfieldMcpError("capability_required");
-    },
-  })
-    .then(() => {
-      verifiedSessionCache.set(
-        input.sessionFingerprint,
-        (input.now ?? Date.now()) + HIGGSFIELD_SESSION_VERIFICATION_TTL_MS,
-      );
-    })
-    .finally(() => {
-      if (verificationFlights.get(input.sessionFingerprint) === promise) {
-        verificationFlights.delete(input.sessionFingerprint);
-      }
-    });
-  verificationFlights.set(input.sessionFingerprint, promise);
-  return promise;
 }
 
 export function requireDiscoveredModel(
