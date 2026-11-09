@@ -41,6 +41,10 @@ function isApiError(value: unknown): value is {
 
 function isAdapterResponse(value: unknown, status: number): value is AdapterResponse {
   if (!isRecord(value) || typeof value.ok !== "boolean") return false;
+  const allowedKeys = value.ok
+    ? new Set(["ok", "value", "__hdex_adapter_response"])
+    : new Set(["ok", "error", "__hdex_adapter_response"]);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (value.ok) {
     return status >= 200 && status < 300 && Object.hasOwn(value, "value");
   }

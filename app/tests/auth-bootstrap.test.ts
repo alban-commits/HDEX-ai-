@@ -238,12 +238,11 @@ test("distinguishes an Access redirect without following or exposing its URL", a
   }
 });
 
-test("accepts a bounded sentinel-marked adapter success when the proxy strips its header", async () => {
+test("accepts a bounded strict adapter success when the proxy strips its header and body marker", async () => {
   const originalFetch = globalThis.fetch;
   const response = Response.json({
     ok: true,
     value: { id: "headerless-success" },
-    [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
   });
   globalThis.fetch = async () => response;
   try {
@@ -254,9 +253,9 @@ test("accepts a bounded sentinel-marked adapter success when the proxy strips it
   }
 });
 
-test("rejects a headerless JSON response without the app body sentinel", async () => {
+test("rejects headerless JSON that does not match the strict adapter envelope", async () => {
   const originalFetch = globalThis.fetch;
-  const response = Response.json({ ok: true, value: { private_token: "private-body" } });
+  const response = Response.json({ ok: true, private_token: "private-body" });
   globalThis.fetch = async () => response;
   try {
     const thrown = await caught(() => fnfBrowserAdapter.getUser());
@@ -328,20 +327,20 @@ test("separates a headerless gateway failure from an app contract failure", asyn
   }
 });
 
-test("accepts only a bounded sentinel-marked adapter error without the response header", async () => {
+test("accepts a bounded strict adapter error without its header or body marker", async () => {
   const originalFetch = globalThis.fetch;
   const valid = Response.json(
     {
       ok: false,
       error: { code: "outcome_unknown", message: "생성 결과를 확인할 수 없습니다.", status: 502 },
-      [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
     },
     { status: 502 },
   );
-  const missingSentinel = Response.json(
+  const invalidEnvelope = Response.json(
     {
       ok: false,
       error: { code: "private-error", message: "private response body", status: 502 },
+      private_token: "private-envelope",
     },
     { status: 502 },
   );
@@ -354,12 +353,12 @@ test("accepts only a bounded sentinel-marked adapter error without the response 
     { status: 502, headers: { "content-type": "application/json" } },
   );
   let index = 0;
-  globalThis.fetch = async () => [valid, missingSentinel, oversized][index++]!;
+  globalThis.fetch = async () => [valid, invalidEnvelope, oversized][index++]!;
   try {
     const accepted = await caught(() => fnfBrowserAdapter.getUser());
     expect(accepted).toMatchObject({ code: "outcome_unknown", status: 502 });
 
-    for (const response of [missingSentinel, oversized]) {
+    for (const response of [invalidEnvelope, oversized]) {
       const rejected = await caught(() => fnfBrowserAdapter.getUser());
       expect(rejected).toMatchObject({
         code: "adapter_non_app_response",

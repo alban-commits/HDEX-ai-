@@ -1,9 +1,5 @@
 import { errorFromJSON } from "@higgsfield/fnf/errors";
-import {
-  HDEX_ADAPTER_BODY_SENTINEL_KEY,
-  HDEX_ADAPTER_BODY_SENTINEL_VALUE,
-  HDEX_ADAPTER_MAX_JSON_BYTES,
-} from "./app-api-contract";
+import { HDEX_ADAPTER_MAX_JSON_BYTES } from "./app-api-contract";
 
 const APP_RESPONSE_HEADER = "X-HDEX-API-Response";
 
@@ -79,16 +75,6 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   } catch {
     return INVALID_BOUNDED_JSON;
   }
-}
-
-function hasAdapterBodySentinel(value: unknown): boolean {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    (value as Record<string, unknown>)[HDEX_ADAPTER_BODY_SENTINEL_KEY] ===
-      HDEX_ADAPTER_BODY_SENTINEL_VALUE
-  );
 }
 
 function throwSafeResponseError(input: {
@@ -168,7 +154,6 @@ export async function fetchAppJson<T>(input: {
       const fallbackValue = await readBoundedJson(response);
       if (
         fallbackValue !== INVALID_BOUNDED_JSON &&
-        hasAdapterBodySentinel(fallbackValue) &&
         input.isEnvelope(fallbackValue, response.status)
       ) {
         return fallbackValue;
