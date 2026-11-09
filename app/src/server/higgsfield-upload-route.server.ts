@@ -8,10 +8,6 @@ import {
 } from "./oauth-routes.server";
 import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-request-security";
-import {
-  getHiggsfieldCapabilityRecord,
-  inspectHiggsfieldCapabilities,
-} from "./higgsfield-mcp.server";
 import { readFile } from "node:fs/promises";
 import { normalizeHiggsfieldUploadImage } from "./image-validation.server";
 import { withTemporaryFile } from "./temporary-storage.server";
@@ -74,14 +70,6 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
       });
     } catch {
       throw new ApiJobError("invalid_file", "이미지 파일을 확인해 주세요.", { status: 400 });
-    }
-    stage = "capability";
-    if (!getHiggsfieldCapabilityRecord(fingerprint)) {
-      await inspectHiggsfieldCapabilities({
-        sessionFingerprint: fingerprint,
-        mcpUrl: active.config.mcpUrl,
-        accessToken: active.session.accessToken,
-      });
     }
     stage = "provider_upload";
     const ref = await withTemporaryFile({

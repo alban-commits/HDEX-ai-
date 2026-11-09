@@ -1390,23 +1390,32 @@ describe("Horizon WebP upload boundary", () => {
     await clearGenerationRuntime(fingerprint, env);
   });
 
-  test("rejects invalid WebP conversion and blocks upload when no approved model is ready", async () => {
+  test("rejects invalid WebP conversion while keeping media upload independent from model discovery", async () => {
     await expect(normalizeHiggsfieldUploadImage({ bytes: new Uint8Array([1, 2, 3]), contentType: "image/webp", maxOriginalBytes: 20 * 1024 * 1024 })).rejects.toThrow();
     const activeSession = { ...session, browserSessionId: "z".repeat(43) };
     const fingerprint = higgsfieldOAuthSessionFingerprint(activeSession);
     const discovered=await inspectHiggsfieldProvider({includeNano:true,now:NOW,listTools:async()=>({tools:toolList}),callTool:async(_name,args)=>({structuredContent:model(String(args.model_id))})});
     const noneReady = { ...discovered, models: discovered.models.map((profile) => ({ ...profile, available: false as const, reason: "profile_invalid" as const })) };
     await inspectHiggsfieldCapabilities({sessionFingerprint:fingerprint,mcpUrl:activeSession.resource,accessToken:activeSession.accessToken,now:NOW,runner:async()=>noneReady});
-    let calls = 0;
-    await expect(uploadHiggsfieldImage({
+    const calls: string[] = [];
+    const ref = await uploadHiggsfieldImage({
       session: activeSession,
       fingerprint,
       filename: "normalized-image.png",
       contentType: "image/png",
       bytes: new Uint8Array([137, 80, 78, 71]),
-      callTool: async () => { calls += 1; return {}; },
-    })).rejects.toMatchObject({ reason: "capability_required" });
-    expect(calls).toBe(0);
+      callTool: async (name) => {
+        calls.push(name);
+        return name === "media_upload"
+          ? { uploads: [{ media_id: "independent-media", upload_url: "https://uploads.higgsfield.ai/put", content_type: "image/png", method: "PUT" }] }
+          : { results: [{ media_id: "independent-media", status: "confirmed" }] };
+      },
+      uploadFetch: async () => new Response(null, { status: 200 }),
+      env,
+      now: NOW,
+    });
+    expect(ref).toEqual({ id: "independent-media", type: "image" });
+    expect(calls).toEqual(["media_upload", "media_confirm"]);
     clearHiggsfieldRuntime(fingerprint);
   });
 });

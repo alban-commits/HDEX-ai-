@@ -1,8 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 import {
   fetchCurrentUser,
   fnfBrowserAdapter,
   getReconnectSignInUrl,
+  clearStaleHiggsfieldOAuthError,
   getFnfScopeKey,
   getLocalUploadFile,
   getSignInUrl,
@@ -77,6 +78,24 @@ test("sends only guests through the app auth route", () => {
   expect(getReconnectSignInUrl("/presets?tab=history")).toBe(
     "/api/higgsfield/oauth/connect?return=%2Fpresets%3Ftab%3Dhistory&account=change",
   );
+});
+
+test("clears a stale OAuth callback error after a valid session is restored", () => {
+  const originalWindow = globalThis.window;
+  const replaceState = mock(() => undefined);
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { href: "https://hdex-ai.dfcorp.shop/?higgsfield=error&reason=state_invalid" },
+      history: { state: null, replaceState },
+    },
+  });
+  try {
+    clearStaleHiggsfieldOAuthError();
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
+  }
 });
 
 test("mints a fresh single-use confirmation token for every explicit submit", async () => {

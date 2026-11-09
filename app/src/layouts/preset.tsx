@@ -37,6 +37,7 @@ import {
   disconnectHiggsfieldOAuth,
   GUEST_SCOPE_KEY,
   getReconnectSignInUrl,
+  clearStaleHiggsfieldOAuthError,
   getSignInUrl,
   PRESET_JOBS,
   releaseAllLocalUploads,
@@ -191,6 +192,11 @@ export function PresetTemplate() {
     [],
   );
   useEffect(() => releaseAllLocalUploads, []);
+  useEffect(() => {
+    if (resolvedScopeKey !== undefined && scopeKey !== GUEST_SCOPE_KEY) {
+      clearStaleHiggsfieldOAuthError();
+    }
+  }, [resolvedScopeKey, scopeKey]);
 
   const history = useInfiniteQuery({
     ...jobsFeedQueryOptions(jobClient, HISTORY_QUERY, { scopeKey }),
@@ -313,11 +319,7 @@ export function PresetTemplate() {
       await disconnectHiggsfieldOAuth();
       clearInfluencerWorkspace();
       if (reconnect) {
-        setPendingSignInUrl(
-          getReconnectSignInUrl(
-            `${window.location.pathname}${window.location.search}${window.location.hash}`,
-          ),
-        );
+        window.location.assign(getReconnectSignInUrl(window.location.pathname));
       } else {
         window.location.reload();
       }

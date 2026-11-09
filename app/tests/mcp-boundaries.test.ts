@@ -507,6 +507,26 @@ describe("Higgsfield MCP discovery boundary", () => {
     expect(generateCalls).toBe(0);
   });
 
+  test("discovers required tools after a provider catalog grows beyond 128 entries", async () => {
+    const filler = Array.from({ length: 142 }, (_, index) => ({
+      name: `provider_tool_${index}`,
+      inputSchema: { type: "object", properties: {} },
+    }));
+    const pages = [filler.slice(0, 100), [...filler.slice(100), ...tools]];
+    const record = await inspectHiggsfieldProvider({
+      now: NOW,
+      listTools: async (cursor) => cursor
+        ? { tools: pages[1]! }
+        : { tools: pages[0]!, nextCursor: "page-2" },
+      callTool: async (_name, args) => ({
+        structuredContent: canonicalDetail(args.model_id === "soul_v2" ? "Soul 2" : "GPT Image 2"),
+      }),
+    });
+    expect(record.toolCount).toBe(147);
+    expect(record.pageCount).toBe(2);
+    expect(record.models.every((model) => model.available)).toBe(true);
+  });
+
   test("keeps bounded search and list only as diagnostics after canonical lookup fails", async () => {
     let listCalls = 0;
     const record = await inspectHiggsfieldProvider({

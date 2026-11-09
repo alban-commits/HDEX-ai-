@@ -7,8 +7,8 @@ import type { HiggsfieldOAuthSession } from "./higgsfield-oauth.server";
 
 export const HIGGSFIELD_MCP_TIMEOUT_MS = 25_000;
 export const HIGGSFIELD_MCP_MAX_RESPONSE_BYTES = 1024 * 1024;
-export const HIGGSFIELD_MCP_MAX_PAGES = 4;
-export const HIGGSFIELD_MCP_MAX_TOOLS = 128;
+export const HIGGSFIELD_MCP_MAX_PAGES = 8;
+export const HIGGSFIELD_MCP_MAX_TOOLS = 256;
 export const HIGGSFIELD_MODEL_MAX_PAGES = 3;
 export const HIGGSFIELD_MODEL_MAX_ITEMS = 300;
 export const HIGGSFIELD_CAPABILITY_TTL_MS = 24 * 60 * 60 * 1_000;

@@ -168,6 +168,14 @@ export function getReconnectSignInUrl(returnPath: string): string {
   return `/api/higgsfield/oauth/connect?return=${encodeURIComponent(safeReturnPath)}&account=change`;
 }
 
+export function clearStaleHiggsfieldOAuthError(): void {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("higgsfield") !== "error") return;
+  url.searchParams.delete("higgsfield");
+  url.searchParams.delete("reason");
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 type UploadResponse =
   | { ok: true; ref: MediaRef }
   | { ok: false; error: { code: string; message: string; status?: number; data?: unknown } };

@@ -271,7 +271,7 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
       onParentWorkspaceReset();
       if (reconnect) {
         setMessage("현재 브라우저 작업을 정리했습니다. OAuth에서 사용할 회사 계정으로 로그인해 주세요.");
-        setPendingSignInUrl(getReconnectSignInUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`));
+        window.location.assign(getReconnectSignInUrl(window.location.pathname));
       } else window.location.reload();
     } catch {
       setMessage("현재 브라우저의 Higgsfield 연결을 해제하지 못했습니다. 잠시 후 다시 시도해 주세요.");
