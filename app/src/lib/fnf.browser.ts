@@ -20,6 +20,15 @@ type HiggsfieldDisconnectResponse = {
   transport: "mcp_oauth";
 };
 
+export type HiggsfieldCapabilitySummary = {
+  status: "ready" | "partial";
+  models: Array<{ key: string; name: string; ready: boolean; reason?: string }>;
+};
+
+type HiggsfieldCapabilityResponse =
+  | { ok: true; capability: HiggsfieldCapabilitySummary }
+  | { ok: false; reason: string; reconnectRequired?: boolean };
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -63,6 +72,34 @@ function isHiggsfieldDisconnectResponse(
   );
 }
 
+function isHiggsfieldCapabilityResponse(
+  value: unknown,
+  status: number,
+): value is HiggsfieldCapabilityResponse {
+  if (!isRecord(value) || typeof value.ok !== "boolean") return false;
+  if (!value.ok) {
+    return (
+      status >= 400 &&
+      typeof value.reason === "string" &&
+      (value.reconnectRequired === undefined || typeof value.reconnectRequired === "boolean")
+    );
+  }
+  if (status < 200 || status >= 300 || !isRecord(value.capability)) return false;
+  const capability = value.capability;
+  return (
+    (capability.status === "ready" || capability.status === "partial") &&
+    Array.isArray(capability.models) &&
+    capability.models.every(
+      (model) =>
+        isRecord(model) &&
+        typeof model.key === "string" &&
+        typeof model.name === "string" &&
+        typeof model.ready === "boolean" &&
+        (model.reason === undefined || typeof model.reason === "string"),
+    )
+  );
+}
+
 function requiresReconnect(error: { code: string; data?: unknown }): boolean {
   return (
     error.code === "oauth_required" ||
@@ -98,6 +135,42 @@ export async function disconnectHiggsfieldOAuth(): Promise<void> {
     isEnvelope: isHiggsfieldDisconnectResponse,
     allowHeaderlessEnvelope: true,
   });
+}
+
+/** Verify the OAuth session against the live Higgsfield MCP tools and model catalog. */
+export async function inspectHiggsfieldOAuthCapabilities(): Promise<HiggsfieldCapabilitySummary> {
+  const result = await fetchAppJson<HiggsfieldCapabilityResponse>({
+    path: "/api/higgsfield/oauth/capabilities",
+    init: { method: "POST", credentials: "include" },
+    isEnvelope: isHiggsfieldCapabilityResponse,
+    allowHeaderlessEnvelope: true,
+  });
+  if (!result.ok) {
+    if (result.reconnectRequired || result.reason === "oauth_required") {
+      notifyHiggsfieldReconnectRequired();
+    }
+    throw errorFromJSON({
+      code: result.reason,
+      message:
+        result.reason === "oauth_required"
+          ? "Higgsfield 계정을 다시 연결해 주세요."
+          : "Higgsfield MCP 도구와 모델 연결을 확인하지 못했습니다.",
+      data: { reconnectRequired: result.reconnectRequired === true },
+    });
+  }
+  if (result.capability.status !== "ready") {
+    const unavailable = result.capability.models
+      .filter((model) => !model.ready)
+      .map((model) => model.name)
+      .join(", ");
+    throw errorFromJSON({
+      code: "higgsfield_models_unavailable",
+      message: unavailable
+        ? `현재 사용할 수 없는 Higgsfield 모델이 있습니다: ${unavailable}`
+        : "Higgsfield 모델 연결이 준비되지 않았습니다.",
+    });
+  }
+  return result.capability;
 }
 
 async function adapterCall(operation: string, data: object = {}): Promise<unknown> {

@@ -8,6 +8,7 @@ import {
   getLocalUploadFile,
   getSignInUrl,
   GUEST_SCOPE_KEY,
+  inspectHiggsfieldOAuthCapabilities,
   releaseAllLocalUploads,
   releaseLocalUpload,
   stageLocalPoseAsset,
@@ -63,6 +64,51 @@ test("opens the public app under a guest scope", async () => {
   try {
     expect(await getFnfScopeKey()).toBe(GUEST_SCOPE_KEY);
   } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("verifies the live Higgsfield MCP tools and models before generation", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    expect(input).toBe("/api/higgsfield/oauth/capabilities");
+    expect(init?.method).toBe("POST");
+    expect(init?.credentials).toBe("include");
+    return appJson({
+      ok: true,
+      capability: {
+        status: "ready",
+        models: [{ key: "soul-2", name: "Soul 2", ready: true }],
+      },
+    });
+  };
+  try {
+    await expect(inspectHiggsfieldOAuthCapabilities()).resolves.toMatchObject({
+      status: "ready",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("requests account reconnection when MCP capability verification rejects OAuth", async () => {
+  const originalFetch = globalThis.fetch;
+  let notifications = 0;
+  const unsubscribe = subscribeHiggsfieldReconnect(() => {
+    notifications += 1;
+  });
+  globalThis.fetch = async () =>
+    appJson(
+      { ok: false, reason: "oauth_required", reconnectRequired: true },
+      { status: 401 },
+    );
+  try {
+    await expect(inspectHiggsfieldOAuthCapabilities()).rejects.toMatchObject({
+      code: "oauth_required",
+    });
+    expect(notifications).toBe(1);
+  } finally {
+    unsubscribe();
     globalThis.fetch = originalFetch;
   }
 });

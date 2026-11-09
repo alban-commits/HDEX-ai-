@@ -18,6 +18,7 @@ import {
   fnfBrowserAdapter,
   getFnfScopeKey,
   GUEST_SCOPE_KEY,
+  inspectHiggsfieldOAuthCapabilities,
   PRESET_JOBS,
 } from "../lib/fnf.browser";
 // Page metadata (browser <title>/favicon + social og: tags) committed into the
@@ -224,6 +225,15 @@ function ScopedApp() {
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
   });
+  const capability = useQuery({
+    queryKey: ["higgsfield", "mcp-capabilities", scope.data],
+    queryFn: inspectHiggsfieldOAuthCapabilities,
+    enabled: scope.data !== undefined && scope.data !== GUEST_SCOPE_KEY,
+    staleTime: 60_000,
+    retry: 1,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+  });
 
   if (scope.error != null) {
     return (
@@ -249,6 +259,48 @@ function ScopedApp() {
             >
               Try again
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (scope.data !== undefined && scope.data !== GUEST_SCOPE_KEY && capability.isPending) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-q-background-primary px-4">
+        <p className="text-q-body-sm-regular text-q-text-secondary">
+          Higgsfield MCP 도구와 이미지 모델 연결을 확인하고 있습니다.
+        </p>
+      </div>
+    );
+  }
+
+  if (scope.data !== undefined && scope.data !== GUEST_SCOPE_KEY && capability.error != null) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-q-background-primary px-4">
+        <div className="max-w-md text-center">
+          <h1 className="text-q-title-md-semi-bold text-q-text-primary">
+            Higgsfield 연결을 확인할 수 없습니다
+          </h1>
+          <p className="mt-2 text-q-body-sm-regular text-q-text-secondary">
+            {capability.error instanceof Error
+              ? capability.error.message
+              : "Higgsfield MCP 연결을 다시 확인해 주세요."}
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <button
+              type="button"
+              className={button({ variant: "primary", size: "md" })}
+              onClick={() => void capability.refetch()}
+            >
+              연결 다시 확인
+            </button>
+            <a
+              href="/api/higgsfield/oauth/connect?return=/&account=change"
+              className={button({ variant: "outline", size: "md" })}
+            >
+              다른 계정 연결
+            </a>
           </div>
         </div>
       </div>
