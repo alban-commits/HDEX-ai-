@@ -105,7 +105,7 @@ async function adapterCall(operation: string, data: object = {}): Promise<unknow
       body: JSON.stringify({ operation, data }),
     },
     isEnvelope: isAdapterResponse,
-    allowHeaderlessAdapterError: true,
+    allowHeaderlessAdapterEnvelope: true,
   });
   if (!result.ok) throwAdapterError(result.error);
   return result.value;

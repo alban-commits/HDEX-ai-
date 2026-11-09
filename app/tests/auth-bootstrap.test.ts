@@ -238,13 +238,25 @@ test("distinguishes an Access redirect without following or exposing its URL", a
   }
 });
 
-test("rejects an unmarked JSON response before reading its body", async () => {
+test("accepts a bounded sentinel-marked adapter success when the proxy strips its header", async () => {
   const originalFetch = globalThis.fetch;
   const response = Response.json({
     ok: true,
-    value: { private_token: "private-body" },
+    value: { id: "headerless-success" },
     [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
   });
+  globalThis.fetch = async () => response;
+  try {
+    await expect(fnfBrowserAdapter.getUser()).resolves.toEqual({ id: "headerless-success" });
+    expect(response.bodyUsed).toBe(true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects a headerless JSON response without the app body sentinel", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = Response.json({ ok: true, value: { private_token: "private-body" } });
   globalThis.fetch = async () => response;
   try {
     const thrown = await caught(() => fnfBrowserAdapter.getUser());
@@ -258,7 +270,7 @@ test("rejects an unmarked JSON response before reading its body", async () => {
         failureStage: "app_header_missing",
       },
     });
-    expect(response.bodyUsed).toBe(false);
+    expect(response.bodyUsed).toBe(true);
     expect(JSON.stringify(thrown)).not.toContain("private-body");
   } finally {
     globalThis.fetch = originalFetch;

@@ -126,7 +126,7 @@ export async function fetchAppJson<T>(input: {
   path: string;
   init: RequestInit;
   isEnvelope: (value: unknown, status: number) => value is T;
-  allowHeaderlessAdapterError?: boolean;
+  allowHeaderlessAdapterEnvelope?: boolean;
 }): Promise<T> {
   const headers = new Headers(input.init.headers);
   headers.set("Accept", "application/json");
@@ -162,9 +162,7 @@ export async function fetchAppJson<T>(input: {
   const contentTypeIsJson = contentType === "application/json";
   if (!appHeaderMatches) {
     if (
-      input.allowHeaderlessAdapterError &&
-      response.status >= 400 &&
-      response.status < 600 &&
+      input.allowHeaderlessAdapterEnvelope &&
       contentTypeIsJson
     ) {
       const fallbackValue = await readBoundedJson(response);
