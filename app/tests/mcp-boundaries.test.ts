@@ -133,6 +133,51 @@ const tools = [
   },
 ];
 
+const currentTools = [
+  ...tools.filter((tool) => tool.name !== "models_explore" && tool.name !== "job_status"),
+  {
+    name: "models_get",
+    inputSchema: {
+      type: "object",
+      properties: { model_id: { type: "string" } },
+    },
+  },
+  {
+    name: "models_list",
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        limit: { type: "integer" },
+        after: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "models_search",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+    },
+  },
+  {
+    name: "jobs_wait",
+    inputSchema: {
+      type: "object",
+      properties: {
+        jobs: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { index: { type: "integer" }, job_id: { type: "string" } },
+          },
+        },
+        timeout_seconds: { type: "integer" },
+      },
+    },
+  },
+];
+
 function detail(name: "Soul 2" | "GPT Image 2") {
   const soul = name === "Soul 2";
   const aspects = ["9:16", "3:4", "2:3", ...(soul ? [] : ["3:2"]), "1:1", "4:3", "16:9"];
@@ -164,6 +209,13 @@ function canonicalDetail(name: "Soul 2" | "GPT Image 2"): Record<string, unknown
   return {
     ...structuredClone(detail(name)),
     id: name === "Soul 2" ? "soul_v2" : "gpt_image_2",
+  };
+}
+
+function currentCanonicalDetail(name: "Soul 2" | "GPT Image 2"): Record<string, unknown> {
+  return {
+    ...canonicalDetail(name),
+    medias: [{ name: "medias", type: "image", roles: ["image"], ...(name === "Soul 2" ? { max: 1 } : {}) }],
   };
 }
 
@@ -247,6 +299,29 @@ async function capturedError(operation: () => Promise<unknown>): Promise<unknown
 }
 
 describe("Higgsfield MCP discovery boundary", () => {
+  test("accepts the current models_get and jobs_wait MCP contract", async () => {
+    const calls: string[] = [];
+    const record = await inspectHiggsfieldProvider({
+      listTools: async () => ({ tools: currentTools }),
+      callTool: async (name, args) => {
+        calls.push(name);
+        if (name !== "models_get") throw new Error(`unexpected tool: ${name}`);
+        return {
+          structuredContent:
+            args.model_id === "soul_v2"
+              ? currentCanonicalDetail("Soul 2")
+              : currentCanonicalDetail("GPT Image 2"),
+        };
+      },
+    });
+    expect(record.models).toEqual([
+      expect.objectContaining({ key: "soul_2", available: true, mediaRole: "image" }),
+      expect.objectContaining({ key: "gpt_image_2", available: true, mediaRole: "image" }),
+    ]);
+    expect(calls).toEqual(["models_get", "models_get"]);
+    expect(record.tools.some((tool) => tool.name === "jobs_wait")).toBe(true);
+  });
+
   test("discovers Soul 2 and GPT Image 2 from models_explore without a paid create", async () => {
     const { record, calls } = await discoveredRecord();
     expect(

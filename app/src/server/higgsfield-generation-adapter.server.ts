@@ -38,7 +38,7 @@ type FnfJob = {
 };
 
 type ToolInvoker = (
-  name: "generate_image" | "job_status",
+  name: "generate_image" | "job_status" | "jobs_wait",
   args: Record<string, unknown>,
 ) => Promise<Record<string, unknown>>;
 
@@ -525,6 +525,30 @@ function parseStatusJob(
   content: Record<string, unknown>,
   expectedJobId: string,
 ): { status: FnfJob["status"]; remoteResultUrl?: string } {
+  if (Array.isArray(content.jobs)) {
+    const matching = content.jobs.filter(
+      (job): job is Record<string, unknown> =>
+        isRecord(job) && safeId(job.job_id) === expectedJobId,
+    );
+    if (matching.length !== 1) {
+      throw new ApiJobError("job_mismatch", "Higgsfield 생성 계보를 확인할 수 없습니다.", {
+        status: 502,
+      });
+    }
+    const status = providerStatus(matching[0]!.status);
+    if (!status) {
+      throw new ApiJobError("invalid_response", "Higgsfield 상태 응답이 올바르지 않습니다.", {
+        status: 502,
+      });
+    }
+    const remoteResultUrl = safeHttpsUrl(matching[0]!.result_url);
+    if (status === "completed" && !remoteResultUrl) {
+      throw new ApiJobError("invalid_response", "완료된 이미지 주소를 확인할 수 없습니다.", {
+        status: 502,
+      });
+    }
+    return { status, ...(remoteResultUrl ? { remoteResultUrl } : {}) };
+  }
   if (!isRecord(content.generation)) {
     throw new ApiJobError("status_unavailable", "Higgsfield 상태를 확인할 수 없습니다.", {
       status: 502,
@@ -879,8 +903,15 @@ export async function getHiggsfieldGeneration(input: {
     const callTool =
       input.callTool ??
       ((name, args) => callHiggsfieldMcpTool({ session: input.session, name, args }));
+    const tools = getHiggsfieldCapabilityRecord(input.fingerprint)?.tools ?? [];
+    const usesCurrentStatus = tools.some((tool) => tool.name === "jobs_wait");
     const next = parseStatusJob(
-      await callTool("job_status", { jobId: stored.providerJobId, sync: false }),
+      usesCurrentStatus
+        ? await callTool("jobs_wait", {
+            jobs: [{ index: 0, job_id: stored.providerJobId }],
+            timeout_seconds: 0,
+          })
+        : await callTool("job_status", { jobId: stored.providerJobId, sync: false }),
       stored.providerJobId,
     );
     stored.status = next.status;
