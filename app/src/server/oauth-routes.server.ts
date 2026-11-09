@@ -121,7 +121,12 @@ function callbackFailureReason(error: unknown): "state_invalid" | "timeout" | "p
 
 export async function handleOAuthConnect(
   request: Request,
-  options: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; now?: number } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    fetchImpl?: typeof fetch;
+    now?: number;
+    verifySession?: (session: HiggsfieldOAuthSession) => Promise<void>;
+  } = {},
 ): Promise<Response> {
   const config = getHiggsfieldOAuthConfig(options.env);
   if (!config) {
@@ -139,6 +144,7 @@ export async function handleOAuthConnect(
     );
     const changeAccount = requestUrl.searchParams.get("account") === "change";
     const original = readOAuthCookies(request);
+    let replaceUnverifiedSession = false;
     if (!changeAccount) {
       const status = await getHiggsfieldOAuthStatus({
         config,
@@ -147,9 +153,17 @@ export async function handleOAuthConnect(
         now: options.now,
       });
       if (status.connected) {
-        const response = oauthRedirect(config, returnPath, "connected");
-        if (status.sessionCookies) appendOAuthSessionCookies(response.headers, status.sessionCookies);
-        return response;
+        const effective = status.sessionCookies ?? original;
+        const session = readHiggsfieldOAuthSession(config, effective, options.now);
+        try {
+          if (!session) throw new Error("higgsfield_oauth_session_invalid");
+          await options.verifySession?.(session);
+          const response = oauthRedirect(config, returnPath, "connected");
+          if (status.sessionCookies) appendOAuthSessionCookies(response.headers, status.sessionCookies);
+          return response;
+        } catch {
+          replaceUnverifiedSession = true;
+        }
       }
     }
     const started = await beginHiggsfieldOAuth(
@@ -160,6 +174,7 @@ export async function handleOAuthConnect(
       changeAccount,
     );
     const response = redirectNoStore(started.authorizationUrl);
+    if (replaceUnverifiedSession) clearAllOAuthCookies(response.headers);
     appendSealedCookie(response.headers, HIGGSFIELD_OAUTH_STATE_COOKIE, started.stateCookie, {
       path: "/api/higgsfield/oauth",
       maxAge: HIGGSFIELD_OAUTH_STATE_TTL_SECONDS,
@@ -179,7 +194,12 @@ export async function handleOAuthConnect(
 
 export async function handleOAuthCallback(
   request: Request,
-  options: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; now?: number } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    fetchImpl?: typeof fetch;
+    now?: number;
+    verifySession?: (session: HiggsfieldOAuthSession) => Promise<void>;
+  } = {},
 ): Promise<Response> {
   const config = getHiggsfieldOAuthConfig(options.env);
   if (!config) {
@@ -218,6 +238,11 @@ export async function handleOAuthCallback(
       fetchImpl: options.fetchImpl,
       now: options.now,
     });
+    if (options.verifySession) {
+      const session = readHiggsfieldOAuthSession(config, completed.sessionCookies, options.now);
+      if (!session) throw new Error("higgsfield_oauth_session_invalid");
+      await options.verifySession(session);
+    }
     const response = oauthRedirect(config, completed.returnPath, "connected");
     clearSealedCookie(response.headers, HIGGSFIELD_OAUTH_STATE_COOKIE, "/api/higgsfield/oauth");
     appendOAuthSessionCookies(response.headers, completed.sessionCookies);

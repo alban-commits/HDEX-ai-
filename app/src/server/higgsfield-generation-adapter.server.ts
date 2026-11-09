@@ -958,7 +958,8 @@ export async function getHiggsfieldGeneration(input: {
       input.callTool ??
       ((name, args) => callHiggsfieldMcpTool({ session: input.session, name, args }));
     const tools = getHiggsfieldCapabilityRecord(input.fingerprint)?.tools ?? [];
-    const usesCurrentStatus = tools.some((tool) => tool.name === "jobs_wait");
+    const usesCurrentStatus =
+      tools.length === 0 || tools.some((tool) => tool.name === "jobs_wait");
     const next = parseStatusJob(
       usesCurrentStatus
         ? await callTool("jobs_wait", {

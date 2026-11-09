@@ -4,6 +4,7 @@ import {
   beginHiggsfieldOAuth,
   completeHiggsfieldOAuth,
   getHiggsfieldOAuthStatus,
+  HIGGSFIELD_OAUTH_SESSION_COOKIE,
   HIGGSFIELD_OAUTH_STATE_COOKIE,
   higgsfieldOAuthSessionFingerprint,
   readHiggsfieldOAuthSession,
@@ -277,18 +278,27 @@ describe("Higgsfield OAuth security contract", () => {
     expect(stateHeader).not.toContain("personal-access-token");
     const stateCookie = stateHeader.split(";", 1)[0]!;
     const authorization = new URL(connect.headers.get("location")!);
+    const verifiedSessions: string[] = [];
     const callback = await handleOAuthCallback(
       new Request(
         `${config.callbackUrl}?code=authorization-code&state=${encodeURIComponent(authorization.searchParams.get("state")!)}`,
         { headers: { cookie: stateCookie } },
       ),
-      { env, fetchImpl: discoveryFetch(), now: NOW },
+      {
+        env,
+        fetchImpl: discoveryFetch(),
+        now: NOW,
+        verifySession: async (session) => {
+          verifiedSessions.push(session.accessToken);
+        },
+      },
     );
     expect(callback.status).toBe(302);
     expect(callback.headers.get("location")).toBe(
       `${PUBLIC_ORIGIN}/presets?tab=history#latest`,
     );
     expect(callback.headers.get("location")).not.toMatch(/generate|submit|resume/);
+    expect(verifiedSessions).toEqual(["personal-access-token"]);
 
     const { cookies } = await connectedCookies();
     const status = await handleOAuthStatus(
@@ -366,6 +376,57 @@ describe("Higgsfield OAuth security contract", () => {
       { env, now: NOW + 1_000 },
     );
     expect(unsafeReturn.headers.get("location")).toBe(`${PUBLIC_ORIGIN}/`);
+  });
+
+  test("restarts OAuth instead of trusting an unverified connected cookie", async () => {
+    const { cookies } = await connectedCookies();
+    const response = await handleOAuthConnect(
+      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=/presets`, {
+        headers: { cookie: cookieHeader(cookies) },
+      }),
+      {
+        env,
+        fetchImpl: discoveryFetch(),
+        now: NOW + 1_000,
+        verifySession: async () => {
+          throw new Error("MCP token rejected");
+        },
+      },
+    );
+    expect(new URL(response.headers.get("location")!).origin).toBe("https://auth.higgsfield.ai");
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain(`${HIGGSFIELD_OAUTH_SESSION_COOKIE}=`);
+    expect(setCookie).toContain("Max-Age=0");
+    expect(setCookie).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
+  });
+
+  test("does not persist OAuth cookies when the exchanged token cannot reach MCP", async () => {
+    const connect = await handleOAuthConnect(
+      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=/presets`),
+      { env, fetchImpl: discoveryFetch(), now: NOW },
+    );
+    const authorization = new URL(connect.headers.get("location")!);
+    const callback = await handleOAuthCallback(
+      new Request(
+        `${config.callbackUrl}?code=authorization-code&state=${encodeURIComponent(authorization.searchParams.get("state")!)}`,
+        { headers: { cookie: stateCookieHeader(connect) } },
+      ),
+      {
+        env,
+        fetchImpl: discoveryFetch(),
+        now: NOW,
+        verifySession: async () => {
+          throw new Error("MCP token rejected");
+        },
+      },
+    );
+    expect(callback.headers.get("location")).toBe(
+      `${PUBLIC_ORIGIN}/presets?higgsfield=error&reason=provider_error`,
+    );
+    const setCookie = callback.headers.get("set-cookie") ?? "";
+    expect(setCookie).not.toContain(`${HIGGSFIELD_OAUTH_SESSION_COOKIE}=`);
+    expect(setCookie).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
+    expect(setCookie).toContain("Max-Age=0");
   });
 
   test("starts a fresh OAuth flow when the existing session requires reconnect", async () => {

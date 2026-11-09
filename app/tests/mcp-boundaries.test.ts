@@ -926,6 +926,36 @@ describe("Higgsfield MCP discovery boundary", () => {
         medias: [],
       },
     });
+    const completed = await getHiggsfieldGeneration({
+      fingerprint,
+      session,
+      jobId: "provider-job-1",
+      env: GENERATION_ENV,
+      now: NOW,
+      callTool: async (name, args) => {
+        calls.push({ name, args });
+        return {
+          jobs: [
+            {
+              job_id: "provider-job-1",
+              status: "completed",
+              result_url: "https://cdn.higgsfield.ai/private/result-1",
+            },
+          ],
+        };
+      },
+    });
+    expect(calls[1]).toEqual({
+      name: "jobs_wait",
+      args: {
+        jobs: [{ index: 0, job_id: "provider-job-1" }],
+        timeout_seconds: 0,
+      },
+    });
+    expect(completed).toMatchObject({
+      status: "completed",
+      result_url: "/api/higgsfield/result/provider-job-1",
+    });
     await clearGenerationRuntime(fingerprint, GENERATION_ENV);
     clearHiggsfieldRuntime(fingerprint);
   });
