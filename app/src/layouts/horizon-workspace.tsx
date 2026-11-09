@@ -12,7 +12,7 @@ import { downloadMedia } from "@/lib/download-media";
 import { ensureHorizonCompletedDirectory, HorizonDirectoryScanError, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchNative, scanHorizonDirectory, supportsHorizonDirectoryPicker, type HorizonDirectoryHandle, type HorizonDirectoryPermission } from "@/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY as HISTORY_QUERY, syncHorizonHistory } from "@/lib/horizon-history";
 import { composeHorizonPrompt, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "@/lib/horizon.browser";
-import { HORIZON_MAX_FOLDER_FILES, HORIZON_MAX_IMAGES, HORIZON_RATIOS, HORIZON_SLOTS, HORIZON_VIEWS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, selectHorizonImages, settleHorizonBatchStatus, type HorizonBatchDownload, type HorizonBatchFailureStage, type HorizonBatchJob, type HorizonBatchStatus, type HorizonEngine, type HorizonImage, type HorizonView } from "@/lib/horizon";
+import { HORIZON_MAX_FOLDER_FILES, HORIZON_MAX_IMAGES, HORIZON_RATIOS, HORIZON_SLOTS, HORIZON_VIEWS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStepFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, selectHorizonImages, settleHorizonBatchStatus, type HorizonBatchDownload, type HorizonBatchFailureStage, type HorizonBatchJob, type HorizonBatchStatus, type HorizonEngine, type HorizonImage, type HorizonView } from "@/lib/horizon";
 import { disconnectHiggsfieldOAuth, fetchCurrentUser, GUEST_SCOPE_KEY, getReconnectSignInUrl, getSignInUrl, PRESET_JOBS, releaseLocalUpload, subscribeHiggsfieldReconnect } from "@/lib/fnf.browser";
 import "./horizon-workspace.css";
 
@@ -404,7 +404,7 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
           });
         } catch (error) {
           if (error instanceof HorizonBatchStepError) throw error;
-          throw new HorizonBatchStepError(stage, horizonBatchStageFailureMessage(stage));
+          throw new HorizonBatchStepError(stage, horizonBatchStepFailureMessage(stage, error));
         }
       }, (current, error) => {
         setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "failed", message: horizonBatchFailureMessage(error) } : item));

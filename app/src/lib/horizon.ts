@@ -36,6 +36,17 @@ export function horizonBatchStageFailureMessage(stage: HorizonBatchFailureStage)
   return "완성 이미지 저장에 실패했습니다.";
 }
 
+export function horizonBatchStepFailureMessage(
+  stage: HorizonBatchFailureStage,
+  error: unknown,
+): string {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message && message.length <= 240) return message;
+  }
+  return horizonBatchStageFailureMessage(stage);
+}
+
 export function settleHorizonBatchStatus(status: HorizonBatchStatus, ready: boolean): HorizonBatchStatus {
   return ready && status !== "completed" && status !== "failed" ? "failed" : status;
 }

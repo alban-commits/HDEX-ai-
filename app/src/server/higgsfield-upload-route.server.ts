@@ -42,11 +42,13 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
   const headers = new Headers(NO_STORE_HEADERS);
   if (active.rotatedCookies) appendOAuthSessionCookies(headers, active.rotatedCookies);
   const fingerprint = higgsfieldOAuthSessionFingerprint(active.session);
+  let stage = "request";
   try {
     const declared = request.headers.get("content-length");
     if (declared && Number(declared) > MAX_UPLOAD_BYTES + 64 * 1024) {
       throw new ApiJobError("file_too_large", "이미지는 20MB 이하여야 합니다.", { status: 413 });
     }
+    stage = "multipart";
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) {
@@ -60,6 +62,7 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
     if (file.size === 0 || file.size > MAX_UPLOAD_BYTES) {
       throw new ApiJobError("file_too_large", "이미지는 20MB 이하여야 합니다.", { status: 413 });
     }
+    stage = "validation";
     const originalContentType = file.type as "image/jpeg" | "image/png" | "image/webp";
     const originalBytes = new Uint8Array(await file.arrayBuffer());
     let normalized: Awaited<ReturnType<typeof normalizeHiggsfieldUploadImage>>;
@@ -72,6 +75,7 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
     } catch {
       throw new ApiJobError("invalid_file", "이미지 파일을 확인해 주세요.", { status: 400 });
     }
+    stage = "capability";
     if (!getHiggsfieldCapabilityRecord(fingerprint)) {
       await inspectHiggsfieldCapabilities({
         sessionFingerprint: fingerprint,
@@ -79,6 +83,7 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
         accessToken: active.session.accessToken,
       });
     }
+    stage = "provider_upload";
     const ref = await withTemporaryFile({
       category: "uploads",
       sessionFingerprint: fingerprint,
@@ -114,6 +119,11 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
       error instanceof ApiJobError
         ? error.toJSON()
         : { code: "upload_failed", message: "이미지 업로드를 완료하지 못했습니다." };
+    console.info("[higgsfield-upload] failed", {
+      stage,
+      code: payload.code,
+      status: payload.status ?? 500,
+    });
     return jsonNoStore(
       { ok: false, error: payload },
       { status: payload.status ?? 500, headers },

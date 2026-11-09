@@ -25,6 +25,13 @@ function safeSignedUploadUrl(value: unknown): string | null {
   }
 }
 
+function safeUploadContentType(value: unknown): "image/jpeg" | "image/png" | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "image/jpeg" || normalized === "image/jpg") return "image/jpeg";
+  return normalized === "image/png" ? "image/png" : null;
+}
+
 export async function uploadHiggsfieldImage(input: {
   session: HiggsfieldOAuthSession;
   fingerprint: string;
@@ -65,10 +72,10 @@ export async function uploadHiggsfieldImage(input: {
   }
   const mediaId = safeId(upload.media_id);
   const uploadUrl = safeSignedUploadUrl(upload.upload_url);
+  const uploadContentType = safeUploadContentType(upload.content_type) ?? input.contentType;
   if (
     !mediaId ||
     !uploadUrl ||
-    upload.content_type !== input.contentType ||
     String(upload.method).toUpperCase() !== "PUT"
   ) {
     throw new ApiJobError("invalid_response", "Higgsfield 업로드 계보를 확인할 수 없습니다.", {
@@ -82,8 +89,8 @@ export async function uploadHiggsfieldImage(input: {
     if (input.uploadFetch) {
       const response = await input.uploadFetch(uploadUrl, {
         method: "PUT",
-        headers: { "Content-Type": input.contentType },
-        body: new Blob([input.bytes as BlobPart], { type: input.contentType }),
+        headers: { "Content-Type": uploadContentType },
+        body: new Blob([input.bytes as BlobPart], { type: uploadContentType }),
         redirect: "error",
         signal: controller.signal,
       });
@@ -98,7 +105,7 @@ export async function uploadHiggsfieldImage(input: {
       const response = await requestPinnedHttps({
         url: uploadUrl,
         method: "PUT",
-        headers: { "Content-Type": input.contentType },
+        headers: { "Content-Type": uploadContentType },
         body: input.bytes,
         maxResponseBytes: MAX_UPLOAD_RESPONSE_BYTES,
         signal: controller.signal,

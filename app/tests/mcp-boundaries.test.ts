@@ -2227,6 +2227,30 @@ describe("Higgsfield MCP discovery boundary", () => {
     clearHiggsfieldRuntime(fingerprint);
   });
 
+  test("accepts provider-normalized JPEG content types for signed uploads", async () => {
+    const fingerprint = "upload-jpeg-content-type";
+    await seed(fingerprint);
+    let sentType = "";
+    await uploadHiggsfieldImage({
+      session,
+      fingerprint,
+      filename: "pose.jpg",
+      contentType: "image/jpeg",
+      bytes: new Uint8Array([255, 216, 255]),
+      callTool: async (name) => name === "media_upload"
+        ? { uploads: [{ media_id: "jpeg-media", upload_url: "https://uploads.example/put", method: "PUT", content_type: "image/jpg" }] }
+        : { results: [{ media_id: "jpeg-media", status: "confirmed" }] },
+      uploadFetch: async (_url, init) => {
+        sentType = new Headers(init?.headers).get("content-type") ?? "";
+        return new Response(null, { status: 200 });
+      },
+      env: GENERATION_ENV,
+    });
+    expect(sentType).toBe("image/jpeg");
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
   test("clears sealed cookies, capability cache, and generation TTL state after MCP 401/403", async () => {
     const fingerprint = "authentication-failure-session";
     await seed(fingerprint);

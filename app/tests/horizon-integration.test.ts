@@ -9,7 +9,7 @@ import { createJobClient, type Generation, type ListResult } from "@higgsfield/f
 import { nanoBanana2 } from "@higgsfield/fnf/jobs";
 import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
-import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
+import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonBatchStepFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
 import { ensureHorizonCompletedDirectory, HORIZON_COMPLETED_DIRECTORY_NAME, HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchNative, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { HORIZON_UPLOAD_MAX_EDGE, HORIZON_UPLOAD_TARGET_BYTES, HORIZON_UPLOAD_TARGET_PIXELS, horizonOptimizedDimensions, optimizeHorizonUploadFile, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
@@ -263,6 +263,8 @@ describe("Horizon selection and folder contracts", () => {
       message: "GPT 이미지 분석 시간이 초과됐습니다. 같은 작업을 다시 시도해 주세요.",
     }]);
     expect(horizonBatchStageFailureMessage("uploading")).toBe("참조 이미지 업로드에 실패했습니다.");
+    expect(horizonBatchStepFailureMessage("uploading", new Error("Higgsfield 이미지 전송에 실패했습니다."))).toBe("Higgsfield 이미지 전송에 실패했습니다.");
+    expect(horizonBatchStepFailureMessage("uploading", { message: "internal" })).toBe("참조 이미지 업로드에 실패했습니다.");
     expect(horizonBatchStageFailureMessage("generating")).toBe("이미지 생성 요청 또는 결과 처리에 실패했습니다.");
     expect(jobs.map((job) => settleHorizonBatchStatus(job.status, job.ready))).toEqual(["failed", "failed", "queued"]);
   });
