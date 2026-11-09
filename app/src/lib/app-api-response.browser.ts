@@ -147,10 +147,10 @@ export async function fetchAppJson<T>(input: {
   const contentType = normalizedContentType(response).value;
   const contentTypeIsJson = contentType === "application/json";
   if (!appHeaderMatches) {
-    if (
-      input.allowHeaderlessEnvelope &&
-      contentTypeIsJson
-    ) {
+    if (input.allowHeaderlessEnvelope && contentType !== "text/html") {
+      // Cloudflare and reverse proxies can strip the app marker or rewrite the
+      // media type. Trust only a bounded body that still matches the exact
+      // route envelope; arbitrary JSON/HTML remains rejected below.
       const fallbackValue = await readBoundedJson(response);
       if (
         fallbackValue !== INVALID_BOUNDED_JSON &&

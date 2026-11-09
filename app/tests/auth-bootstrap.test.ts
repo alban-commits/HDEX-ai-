@@ -272,6 +272,25 @@ test("accepts a bounded strict adapter success when the proxy strips its header 
   }
 });
 
+test("accepts a strict upload envelope when a proxy rewrites JSON as plain text", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        ok: true,
+        ref: { id: "plain-text-media", type: "image" },
+      }),
+      { status: 200, headers: { "content-type": "text/plain; charset=utf-8" } },
+    );
+  try {
+    const asset = await uploadAsset(new File(["image"], "proxy.png", { type: "image/png" }));
+    expect(asset.ref).toEqual({ id: "plain-text-media", type: "media_input" });
+  } finally {
+    releaseAllLocalUploads();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects headerless JSON that does not match the strict adapter envelope", async () => {
   const originalFetch = globalThis.fetch;
   const response = Response.json({ ok: true, private_token: "private-body" });
