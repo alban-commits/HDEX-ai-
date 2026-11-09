@@ -12,9 +12,7 @@ import {
 } from "./higgsfield-generation-adapter.server";
 import { higgsfieldOAuthSessionFingerprint } from "./higgsfield-oauth.server";
 import {
-  getHiggsfieldCapabilityRecord,
   HiggsfieldMcpError,
-  inspectHiggsfieldCapabilities,
 } from "./higgsfield-mcp.server";
 import {
   appendOAuthSessionCookies,
@@ -150,13 +148,6 @@ export async function handleHiggsfieldAdapter(
         ) {
           throw new ApiJobError("validation", "생성 요청 형식이 올바르지 않습니다.", {
             status: 400,
-          });
-        }
-        if (!getHiggsfieldCapabilityRecord(fingerprint)) {
-          await inspectHiggsfieldCapabilities({
-            sessionFingerprint: fingerprint,
-            mcpUrl: active.config.mcpUrl,
-            accessToken: active.session.accessToken,
           });
         }
         value = await (options.createGeneration ?? createHiggsfieldGeneration)({

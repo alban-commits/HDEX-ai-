@@ -6,7 +6,6 @@ import {
   HiggsfieldMcpContentError,
   HiggsfieldMcpError,
   parseHiggsfieldMcpContent,
-  requireDiscoveredModel,
   type DiscoveredModelProfile,
   type HiggsfieldMcpParseFailure,
   type HiggsfieldMcpRejectionClass,
@@ -242,6 +241,55 @@ function supportsAdvertisedAspect(profile: DiscoveredModelProfile, requested: st
   );
 }
 
+function builtInGenerationProfile(
+  jobSetType: FnfJob["job_set_type"],
+): DiscoveredModelProfile & { available: true; modelId: string } {
+  const sharedAspectRatios = ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"];
+  if (jobSetType === "text2image_soul_v2") {
+    return {
+      key: "soul_2",
+      displayName: "Soul 2",
+      available: true,
+      modelId: "soul_v2",
+      aspectRatios: sharedAspectRatios,
+      aspectRatioParameter: "aspect_ratio",
+      resolutionParameter: "quality",
+      resolutionValue: "2k",
+      mediaRole: "image",
+      maximumImages: 1,
+    };
+  }
+  if (jobSetType === "nano_banana_2") {
+    return {
+      key: "nano_banana_pro",
+      displayName: "Nano Banana Pro",
+      available: true,
+      modelId: "nano_banana_pro",
+      aspectRatios: ["2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "1:1"],
+      aspectRatioParameter: "aspect_ratio",
+      resolutionParameter: "resolution",
+      resolutionValue: "2k",
+      resolutionValues: { "2k": "2k", "4k": "4k" },
+      mediaRole: "image",
+      maximumImages: 14,
+    };
+  }
+  return {
+    key: "gpt_image_2",
+    displayName: "GPT Image 2",
+    available: true,
+    modelId: "gpt_image_2",
+    aspectRatios: [...sharedAspectRatios, "3:2"],
+    aspectRatioParameter: "aspect_ratio",
+    resolutionParameter: "resolution",
+    resolutionValue: "2k",
+    qualityParameter: "quality",
+    qualityValue: "high",
+    mediaRole: "image",
+    maximumImages: 14,
+  };
+}
+
 function executionParams(input: {
   fingerprint: string;
   jobSetType: FnfJob["job_set_type"];
@@ -251,7 +299,13 @@ function executionParams(input: {
   params: Record<string, unknown>;
 } {
   const modelKey = input.jobSetType === "text2image_soul_v2" ? "soul_2" : input.jobSetType === "nano_banana_2" ? "nano_banana_pro" : "gpt_image_2";
-  const profile = requireDiscoveredModel(input.fingerprint, modelKey);
+  const discovered = getHiggsfieldCapabilityRecord(input.fingerprint)?.models.find(
+    (candidate) => candidate.key === modelKey,
+  );
+  const profile =
+    discovered?.available && discovered.modelId
+      ? (discovered as DiscoveredModelProfile & { available: true; modelId: string })
+      : builtInGenerationProfile(input.jobSetType);
   const prompt = typeof input.params.prompt === "string" ? input.params.prompt.trim() : "";
   const count = Number(input.params.batch_size ?? 1);
   const aspectRatio =

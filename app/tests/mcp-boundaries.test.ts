@@ -882,9 +882,8 @@ describe("Higgsfield MCP discovery boundary", () => {
     ).rejects.toMatchObject({ reason: "capability_required" });
   });
 
-  test("maps Soul UI 1080p to canonical MCP quality 2k for the explicit generation attempt", async () => {
+  test("submits Soul directly without a capability-cache warmup and maps 1080p to MCP quality 2k", async () => {
     const fingerprint = "generation-session";
-    await seed(fingerprint);
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const jobs = await createHiggsfieldGeneration({
       fingerprint,
