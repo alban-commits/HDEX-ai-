@@ -265,6 +265,57 @@ test("rejects an unmarked JSON response before reading its body", async () => {
   }
 });
 
+test("classifies a headerless Cloudflare-style HTML response as an expired access session", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = new Response("<!doctype html><p>private-login-page</p>", {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+  globalThis.fetch = async () => response;
+  try {
+    const thrown = await caught(() => fnfBrowserAdapter.getUser());
+    expect(thrown).toMatchObject({
+      code: "access_session_required",
+      data: {
+        httpStatus: 200,
+        contentType: "text/html",
+        appResponseHeaderMatches: false,
+        failureStage: "app_header_missing",
+      },
+    });
+    expect(response.bodyUsed).toBe(false);
+    expect(JSON.stringify(thrown)).not.toContain("private-login-page");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("separates a headerless gateway failure from an app contract failure", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = new Response("<!doctype html><p>private-proxy-error</p>", {
+    status: 502,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+  globalThis.fetch = async () => response;
+  try {
+    const thrown = await caught(() => fnfBrowserAdapter.getUser());
+    expect(thrown).toMatchObject({
+      code: "adapter_gateway_unavailable",
+      status: 502,
+      data: {
+        httpStatus: 502,
+        contentType: "text/html",
+        appResponseHeaderMatches: false,
+        failureStage: "app_header_missing",
+      },
+    });
+    expect(response.bodyUsed).toBe(false);
+    expect(JSON.stringify(thrown)).not.toContain("private-proxy-error");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("accepts only a bounded sentinel-marked adapter error without the response header", async () => {
   const originalFetch = globalThis.fetch;
   const valid = Response.json(
@@ -411,7 +462,7 @@ test("separates upload Access redirects and unmarked HTML without exposing eithe
       uploadAsset(new File(["image"], "html.png", { type: "image/png" })),
     );
     expect(htmlError).toMatchObject({
-      code: "adapter_non_app_response",
+      code: "adapter_gateway_unavailable",
       data: { contentType: "text/html", appResponseHeaderMatches: false },
     });
     expect(responses[1]?.bodyUsed).toBe(false);
@@ -468,7 +519,7 @@ test("separates profile Access redirects and unmarked HTML without exposing Form
 
     const htmlError = await caught(() => composeInfluencerProfile(input));
     expect(htmlError).toMatchObject({
-      code: "adapter_non_app_response",
+      code: "adapter_gateway_unavailable",
       data: { contentType: "text/html", appResponseHeaderMatches: false },
     });
     expect(responses[1]?.bodyUsed).toBe(false);
