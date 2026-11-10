@@ -12,8 +12,8 @@ import { downloadMedia } from "@/lib/download-media";
 import { ensureHorizonCompletedDirectory, HorizonDirectoryScanError, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchNative, scanHorizonDirectory, supportsHorizonDirectoryPicker, type HorizonDirectoryHandle, type HorizonDirectoryPermission } from "@/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY as HISTORY_QUERY, syncHorizonHistory } from "@/lib/horizon-history";
 import { composeHorizonPrompt, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "@/lib/horizon.browser";
-import { HORIZON_MAX_FOLDER_FILES, HORIZON_MAX_IMAGES, HORIZON_RATIOS, HORIZON_SLOTS, HORIZON_VIEWS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, selectHorizonImages, settleHorizonBatchStatus, type HorizonBatchDownload, type HorizonBatchFailureStage, type HorizonBatchJob, type HorizonBatchStatus, type HorizonEngine, type HorizonImage, type HorizonView } from "@/lib/horizon";
-import { disconnectHiggsfieldOAuth, GUEST_SCOPE_KEY, getReconnectSignInUrl, getSignInUrl, PRESET_JOBS, releaseLocalUpload, subscribeHiggsfieldReconnect } from "@/lib/fnf.browser";
+import { HORIZON_MAX_FOLDER_FILES, HORIZON_MAX_IMAGES, HORIZON_RATIOS, HORIZON_SLOTS, HORIZON_VIEWS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStepFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, selectHorizonImages, settleHorizonBatchStatus, type HorizonBatchDownload, type HorizonBatchFailureStage, type HorizonBatchJob, type HorizonBatchStatus, type HorizonEngine, type HorizonImage, type HorizonView } from "@/lib/horizon";
+import { disconnectHiggsfieldOAuth, fetchCurrentUser, GUEST_SCOPE_KEY, getReconnectSignInUrl, getSignInUrl, PRESET_JOBS, releaseLocalUpload, subscribeHiggsfieldReconnect } from "@/lib/fnf.browser";
 import "./horizon-workspace.css";
 
 type GenerationInput = SubmitInputFor<typeof PRESET_JOBS>;
@@ -79,10 +79,19 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
   const [draggingSlots, setDraggingSlots] = useState<Set<string>>(() => new Set());
   const accountActionFlight = useRef(false);
   const [accountAction, setAccountAction] = useState<AccountMutation | null>(null);
+  const [accountEmail, setAccountEmail] = useState<string | null | undefined>(undefined);
   const generationActive = useRef(false);
   const promptFlight = useRef<Promise<string | null> | null>(null);
 
   useEffect(() => subscribeHiggsfieldReconnect(() => setPendingSignInUrl(getReconnectSignInUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`))), []);
+  useEffect(() => {
+    if (resolvedScopeKey === undefined || scopeKey === GUEST_SCOPE_KEY) return;
+    let active = true;
+    void fetchCurrentUser().then((user) => {
+      if (active) setAccountEmail(user?.accountEmail ?? null);
+    });
+    return () => { active = false; };
+  }, [resolvedScopeKey, scopeKey]);
   useEffect(() => {
     let active = true;
     void Promise.resolve().then(async () => {
@@ -262,7 +271,7 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
       onParentWorkspaceReset();
       if (reconnect) {
         setMessage("현재 브라우저 작업을 정리했습니다. OAuth에서 사용할 회사 계정으로 로그인해 주세요.");
-        setPendingSignInUrl(getReconnectSignInUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`));
+        window.location.assign(getReconnectSignInUrl(window.location.pathname));
       } else window.location.reload();
     } catch {
       setMessage("현재 브라우저의 Higgsfield 연결을 해제하지 못했습니다. 잠시 후 다시 시도해 주세요.");
@@ -395,7 +404,7 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
           });
         } catch (error) {
           if (error instanceof HorizonBatchStepError) throw error;
-          throw new HorizonBatchStepError(stage, horizonBatchStageFailureMessage(stage));
+          throw new HorizonBatchStepError(stage, horizonBatchStepFailureMessage(stage, error));
         }
       }, (current, error) => {
         setBatch((items) => items.map((item) => item.key === current.key ? { ...item, status: "failed", message: horizonBatchFailureMessage(error) } : item));
@@ -449,7 +458,7 @@ export function HorizonWorkspace({ onBack, onParentWorkspaceReset, parentBusy = 
     <aside className="hz-sidebar"><div className="hz-brand"><div className="hz-logo">H</div> AI HORIZON</div><nav className="hz-nav"><button className="active">이미지 생성</button><button disabled={accountMutationBlocked} onClick={reset}>전체 초기화</button><button disabled={accountMutationBlocked} onClick={leaveHorizon}>인플루언서 콘텐츠</button></nav><div className="hz-side-note">자동화 규격 <b>AUTO FOLDER V6</b><br/>브라우저에서 선택한 폴더별 결과를 완성합니다.</div></aside>
     <main className="hz-main"><div className="hz-content">
       <header className="hz-topbar"><div><h1>패션 이미지 생성</h1><p>개별 이미지 또는 번호 폴더 전체를 각자의 계정으로 자동 생성합니다.</p></div><div className="hz-statuses"><span className="hz-status ok">PERSONAL DISTRIBUTION V17</span><span className="hz-status ok">회사 OpenAI 서버</span><span className={`hz-status ${connection.status === "connected" ? "ok" : ""}`}>{connection.label}</span></div></header>
-      <section className="hz-account-panel"><div className="hz-account-card"><div><h3>회사 OpenAI 서버</h3><p>Windows NSSM의 OPENAI_API_KEY를 직원 전체가 공용 사용합니다.</p></div><span className="hz-account-state">직원 공용</span></div><div className="hz-account-card"><div><h3>내 Higgsfield 계정</h3><p>{accountMutationBlocked?"작업 진행 중에는 계정 변경과 연결 해제를 사용할 수 없습니다.":"회사 배정 계정은 OAuth 제공자 화면에서 선택합니다."}</p></div>{resolvedScopeKey===undefined?<button className="hz-auth-button" disabled>연결 확인 중</button>:scopeKey===GUEST_SCOPE_KEY?<button className="hz-auth-button" onClick={()=>requireSignIn()}>연결</button>:<div className="hz-account-actions"><button className="hz-auth-button hz-auth-switch" title="현재 연결을 끊고 다른 Higgsfield 계정으로 로그인" disabled={accountMutationBlocked} onClick={()=>void disconnect(true)}>{accountAction==="reconnect"?"계정 변경 중…":"계정 변경"}</button><button className="hz-auth-button hz-auth-disconnect" title="이 브라우저의 Higgsfield 연결만 해제" disabled={accountMutationBlocked} onClick={()=>void disconnect(false)}>{accountAction==="disconnect"?"연결 해제 중…":"연결 해제"}</button></div>}</div></section>
+      <section className="hz-account-panel"><div className="hz-account-card"><div><h3>회사 OpenAI 서버</h3><p>Windows NSSM의 OPENAI_API_KEY를 직원 전체가 공용 사용합니다.</p></div><span className="hz-account-state">직원 공용</span></div><div className="hz-account-card"><div><h3>내 Higgsfield 계정</h3>{scopeKey!==GUEST_SCOPE_KEY?<p className="hz-account-email">{accountEmail===undefined?"계정 정보 확인 중…":accountEmail??"연결된 Higgsfield 계정"}</p>:null}<p>{accountMutationBlocked?"작업 진행 중에는 계정 변경과 연결 해제를 사용할 수 없습니다.":"회사 배정 계정은 OAuth 제공자 화면에서 선택합니다."}</p></div>{resolvedScopeKey===undefined?<button className="hz-auth-button" disabled>연결 확인 중</button>:scopeKey===GUEST_SCOPE_KEY?<button className="hz-auth-button" onClick={()=>requireSignIn()}>연결</button>:<div className="hz-account-actions"><button className="hz-auth-button hz-auth-switch" title="현재 연결을 끊고 다른 Higgsfield 계정으로 로그인" disabled={accountMutationBlocked} onClick={()=>void disconnect(true)}>{accountAction==="reconnect"?"계정 변경 중…":"계정 변경"}</button><button className="hz-auth-button hz-auth-disconnect" title="이 브라우저의 Higgsfield 연결만 해제" disabled={accountMutationBlocked} onClick={()=>void disconnect(false)}>{accountAction==="disconnect"?"연결 해제 중…":"연결 해제"}</button></div>}</div></section>
       <div className="hz-workspace"><div className="hz-steps">
         {(["model","wardrobe","accessory"] as const).map((group,index)=><section className="hz-step" key={group}><div className="hz-step-head"><div className="hz-num">0{index+1}</div><div><h3>{group==="model"?"모델 참조":group==="wardrobe"?"의상 참조":"액세서리 참조"}</h3><p>{group==="model"?"인물과 포즈를 유지할 기준 이미지를 올려주세요.":group==="wardrobe"?"전신 착장 또는 상의·하의 디테일 이미지를 올려주세요.":"가방, 모자, 주얼리, 신발 등 필요한 항목만 선택하세요."}</p></div></div><div className="hz-upload-grid">{HORIZON_SLOTS.filter((slot)=>slot.group===group).map((slot)=>{const items=images.filter((image)=>image.slotId===slot.id);const slotDragging=draggingSlots.has(slot.id);const slotUploading=uploadingSlots.has(slot.id);return <div className={`hz-upload ${items.length?"has-items":""} ${slotDragging?"drag-active":""} ${slotUploading?"uploading":""}`} key={slot.id} aria-disabled={batchRunning||slotUploading} aria-busy={slotUploading} onDragEnter={(event)=>{event.preventDefault();beginSlotDrag(slot.id);}} onDragLeave={(event)=>{event.preventDefault();endSlotDrag(slot.id);}} onDragOver={(event)=>{event.preventDefault();event.dataTransfer.dropEffect="copy";}} onDrop={(event)=>{event.preventDefault();clearSlotDrag(slot.id);void addFiles(slot.id,[...event.dataTransfer.files]);}}><label className="hz-upload-add"><input type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={batchRunning||slotUploading} onChange={(event)=>{void addFiles(slot.id,[...(event.target.files??[])]);event.currentTarget.value="";}}/><span className="hz-upload-copy"><b>{slot.label}</b><strong>{slotUploading?"업로드 중…":slotDragging?"여기에 놓아 업로드":"여러 장 선택"}</strong><small>{slotUploading?"이미지를 안전하게 처리하고 있습니다.":"한 번에 여러 장 또는 반복해서 계속 추가"}</small><small className="hz-drop-copy">{slotDragging?"마우스를 놓으면 이 카드에 추가됩니다.":"폴더에서 이 카드로 드래그앤드롭 가능"}</small></span><em>{items.length}장</em><i>{slot.hint}</i></label><div className="hz-thumb-list">{items.map((image)=><div className={`hz-ref-thumb ${image.selected?"selected":""}`} key={image.id}><button type="button" className="hz-ref-toggle" disabled={batchRunning} aria-pressed={image.selected} aria-label={`${image.code} ${slot.label} 적용 ${image.selected?"해제":"선택"}`} onClick={()=>toggleImage(image.id)}><img src={image.asset.src} alt=""/><span className="hz-ref-code">{image.code}</span><span className="hz-ref-check">{image.selected?"✓":"–"}</span></button><button type="button" className="hz-ref-remove" disabled={batchRunning} aria-label={`${image.code} 삭제`} onClick={()=>removeImage(image.id)}>×</button></div>)}</div></div>})}</div></section>)}
         <section className="hz-step"><div className="hz-step-head"><div className="hz-num">04</div><div><h3>선택 옵션 · 비워도 됨</h3><p>이미지만으로 자동 작성하거나 M1 W2 W3 A1처럼 사용할 번호만 적으세요.</p></div></div><div className="hz-fields"><textarea maxLength={1200} disabled={batchRunning} value={brief} onChange={(event)=>{setBrief(event.target.value);invalidate();}} placeholder="아무것도 쓰지 않아도 됩니다. 번호로 고르려면 예: M1 W2 W3 A1 / 추가 요청이 있을 때만 한국어로 작성"/><div className="hz-prompt-actions"><button className="hz-primary" disabled={promptBusy||batchRunning} onClick={()=>void writePrompt()}>{promptBusy?"자동 JSON 분석 중…":"이미지로 자동 JSON 명령어 작성"}</button><span className="hz-hint">{brief.length}/1200 · 빈칸 가능 · 번호만 입력 가능</span></div></div></section>

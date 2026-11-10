@@ -24,12 +24,7 @@ import { Composer } from "@/components/composer";
 import { RailFooter } from "@/components/rail-footer";
 import { SignInModal } from "@/components/sign-in-modal";
 import { UploadField } from "@/components/upload-field";
-import { AssetLibraryModal } from "@/components/asset-library";
-import type {
-  AssetLibraryItem,
-  AssetLibraryPagination,
-  AssetSelection,
-} from "@/components/asset-library";
+import type { AssetSelection } from "@/components/asset-library";
 import type { GalleryItem } from "@/components/gallery";
 import { generationToGalleryItem } from "@/lib/higgsfield-generation-results";
 import { getNextCursor } from "@/lib/cursor-pages";
@@ -37,12 +32,14 @@ import {
   disconnectHiggsfieldOAuth,
   GUEST_SCOPE_KEY,
   getReconnectSignInUrl,
+  clearStaleHiggsfieldOAuthError,
+  getHiggsfieldOAuthCallbackMessage,
   getSignInUrl,
   PRESET_JOBS,
   releaseAllLocalUploads,
   releaseLocalUpload,
+  stageLocalPoseAsset,
   subscribeHiggsfieldReconnect,
-  uploadAsset,
 } from "@/lib/fnf.browser";
 import { composeInfluencerProfile } from "@/lib/profile.browser";
 import { savePreferences } from "@/lib/preferences.functions";
@@ -171,11 +168,15 @@ export function PresetTemplate() {
   const [aspectRatio, setAspectRatio] = useState<(typeof RATIOS)[number]>("2:3");
   const [count, setCount] = useState("1");
   const [pose, setPose] = useState<AssetSelection | null>(null);
-  const [uploads, setUploads] = useState<AssetLibraryItem[]>([]);
+  const poseFileInputRef = useRef<HTMLInputElement>(null);
   const [brief, setBrief] = useState("");
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [profileBusy, setProfileBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(() =>
+    typeof window === "undefined"
+      ? ""
+      : (getHiggsfieldOAuthCallbackMessage(window.location.href) ?? ""),
+  );
   const [activeTab, setActiveTab] = useState("json");
   const [pendingSignInUrl, setPendingSignInUrl] = useState<string | null>(null);
 
@@ -191,6 +192,11 @@ export function PresetTemplate() {
     [],
   );
   useEffect(() => releaseAllLocalUploads, []);
+  useEffect(() => {
+    if (resolvedScopeKey !== undefined && scopeKey !== GUEST_SCOPE_KEY) {
+      clearStaleHiggsfieldOAuthError();
+    }
+  }, [resolvedScopeKey, scopeKey]);
 
   const history = useInfiniteQuery({
     ...jobsFeedQueryOptions(jobClient, HISTORY_QUERY, { scopeKey }),
@@ -205,15 +211,6 @@ export function PresetTemplate() {
         .map(generationToGalleryItem)
         .filter((item): item is GalleryItem => item != null),
     [generations],
-  );
-
-  const pagination = useMemo<AssetLibraryPagination>(
-    () => ({
-      uploads: { hasMore: false, loading: false, onLoadMore: async () => undefined },
-      image: { hasMore: false, loading: false, onLoadMore: async () => undefined },
-      video: { hasMore: false, loading: false, onLoadMore: async () => undefined },
-    }),
-    [],
   );
 
   const masterPrompt =
@@ -268,17 +265,18 @@ export function PresetTemplate() {
     const previousId = pose?.ref?.id;
     if (previousId && previousId !== selected.ref?.id) {
       releaseLocalUpload(previousId);
-      setUploads((current) => current.filter((entry) => entry.ref?.id !== previousId));
     }
     setPose(selected);
+    setProfile(null);
   }, [pose]);
 
-  const handleUpload = useCallback(async (file: File) => {
-    const selected = await uploadAsset(file);
-    const item = { ...selected, kind: "upload" as const, personal: true };
-    setUploads((current) => [item, ...current.filter((entry) => entry.ref?.id !== item.ref?.id)]);
-    selectPose(selected);
-    return selected;
+  const handlePoseFile = useCallback((file: File) => {
+    try {
+      selectPose(stageLocalPoseAsset(file));
+      setMessage("포즈 이미지가 추가됐습니다. GPT JSON 만들기를 눌러 분석하세요.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "포즈 이미지를 불러오지 못했습니다.");
+    }
   }, [selectPose]);
 
   const requireSignIn = () => {
@@ -296,7 +294,6 @@ export function PresetTemplate() {
   const clearInfluencerWorkspace = () => {
     releaseAllLocalUploads();
     setPose(null);
-    setUploads([]);
     setProfile(null);
     prepended.current.clear();
     removeGenerationQueries(queryClient, { scopeKey });
@@ -313,11 +310,7 @@ export function PresetTemplate() {
       await disconnectHiggsfieldOAuth();
       clearInfluencerWorkspace();
       if (reconnect) {
-        setPendingSignInUrl(
-          getReconnectSignInUrl(
-            `${window.location.pathname}${window.location.search}${window.location.hash}`,
-          ),
-        );
+        window.location.assign(getReconnectSignInUrl(window.location.pathname));
       } else {
         window.location.reload();
       }
@@ -478,38 +471,43 @@ export function PresetTemplate() {
           />
         )}
 
-        <AssetLibraryModal
-          items={uploads}
-          pagination={pagination}
-          onUpload={handleUpload}
-          onSelect={selectPose}
-          trigger={
-            pose ? (
-              <UploadField
-                preview={pose.src}
-                previewAlt={pose.name}
-                previewType="image"
-                onRemove={() => {
-                  if (pose.ref?.id) {
-                    releaseLocalUpload(pose.ref.id);
-                    setUploads((current) => current.filter((entry) => entry.ref?.id !== pose.ref?.id));
-                  }
-                  setPose(null);
-                  setProfile(null);
-                }}
-                className="grow-0"
-              />
-            ) : (
-              <UploadField
-                render={<button type="button" />}
-                icon={Image}
-                title={mode === "influencer" ? "포즈 이미지 추가" : "제품 또는 기준 이미지 추가"}
-                subtitle="JPG, PNG · 20MB 이하"
-                className="grow-0"
-              />
-            )
-          }
+        <input
+          ref={poseFileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+          className="sr-only"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (file) handlePoseFile(file);
+          }}
         />
+        {pose ? (
+          <UploadField
+            preview={pose.src}
+            previewAlt={pose.name}
+            previewType="image"
+            onRemove={() => {
+              if (pose.ref?.id) releaseLocalUpload(pose.ref.id);
+              setPose(null);
+              setProfile(null);
+            }}
+            className="grow-0"
+          />
+        ) : (
+          <UploadField
+            render={
+              <button
+                type="button"
+                onClick={() => poseFileInputRef.current?.click()}
+              />
+            }
+            icon={Image}
+            title={mode === "influencer" ? "포즈 이미지 추가" : "제품 또는 기준 이미지 추가"}
+            subtitle="PC에서 JPG 또는 PNG 선택 · 20MB 이하"
+            className="grow-0"
+          />
+        )}
 
         {mode === "influencer" ? (
           <FieldSelect

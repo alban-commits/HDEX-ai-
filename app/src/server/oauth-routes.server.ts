@@ -11,6 +11,7 @@ import {
   HIGGSFIELD_OAUTH_SESSION_TTL_SECONDS,
   HIGGSFIELD_OAUTH_STATE_COOKIE,
   HIGGSFIELD_OAUTH_STATE_TTL_SECONDS,
+  matchesHiggsfieldOAuthCallbackState,
   readHiggsfieldOAuthSession,
   safeOAuthReturnPath,
   validateHiggsfieldOAuthCallbackState,
@@ -133,26 +134,31 @@ export async function handleOAuthConnect(
   const crossSite = rejectCrossSiteMutation(request, config.publicOrigin);
   if (crossSite) return crossSite;
   try {
+    const requestUrl = new URL(request.url);
     const returnPath = safeOAuthReturnPath(
-      new URL(request.url).searchParams.get("return") ?? "/",
+      requestUrl.searchParams.get("return") ?? "/",
     );
+    const changeAccount = requestUrl.searchParams.get("account") === "change";
     const original = readOAuthCookies(request);
-    const status = await getHiggsfieldOAuthStatus({
-      config,
-      sessionCookies: original,
-      fetchImpl: options.fetchImpl,
-      now: options.now,
-    });
-    if (status.connected) {
-      const response = oauthRedirect(config, returnPath, "connected");
-      if (status.sessionCookies) appendOAuthSessionCookies(response.headers, status.sessionCookies);
-      return response;
+    if (!changeAccount) {
+      const status = await getHiggsfieldOAuthStatus({
+        config,
+        sessionCookies: original,
+        fetchImpl: options.fetchImpl,
+        now: options.now,
+      });
+      if (status.connected) {
+        const response = oauthRedirect(config, returnPath, "connected");
+        if (status.sessionCookies) appendOAuthSessionCookies(response.headers, status.sessionCookies);
+        return response;
+      }
     }
     const started = await beginHiggsfieldOAuth(
       config,
       options.fetchImpl,
       options.now,
       returnPath,
+      changeAccount,
     );
     const response = redirectNoStore(started.authorizationUrl);
     appendSealedCookie(response.headers, HIGGSFIELD_OAUTH_STATE_COOKIE, started.stateCookie, {
@@ -195,6 +201,15 @@ export async function handleOAuthCallback(
     });
   } catch {
     const response = oauthRedirect(config, "/", "error", "state_invalid");
+    if (
+      matchesHiggsfieldOAuthCallbackState({
+        config,
+        stateCookie,
+        returnedState: url.searchParams.get("state"),
+      })
+    ) {
+      clearSealedCookie(response.headers, HIGGSFIELD_OAUTH_STATE_COOKIE, "/api/higgsfield/oauth");
+    }
     return response;
   }
   const providerError = url.searchParams.get("error");
@@ -249,7 +264,6 @@ export async function handleOAuthStatus(
   });
   const headers = new Headers(NO_STORE_HEADERS);
   if (!status.connected) {
-    clearAllOAuthCookies(headers);
     return Response.json(
       {
         available: true,
@@ -263,7 +277,6 @@ export async function handleOAuthStatus(
   const effective = status.sessionCookies ?? original;
   const session = readHiggsfieldOAuthSession(config, effective, options.now);
   if (!session) {
-    clearAllOAuthCookies(headers);
     return Response.json(
       { available: true, connected: false, reconnectRequired: true, transport: "mcp_oauth" },
       { headers },
@@ -276,6 +289,9 @@ export async function handleOAuthStatus(
       available: true,
       connected: true,
       transport: "mcp_oauth",
+      ...(typeof session.accountEmail === "string"
+        ? { account: { email: session.accountEmail } }
+        : {}),
       ...(options.capabilitySummary
         ? { capability: options.capabilitySummary(fingerprint, options.now) }
         : {}),
@@ -289,13 +305,14 @@ export async function handleOAuthDisconnect(
   options: {
     env?: NodeJS.ProcessEnv;
     clearRuntime?: (fingerprint: string) => void | Promise<void>;
+    now?: number;
   } = {},
 ): Promise<Response> {
   const config = getHiggsfieldOAuthConfig(options.env);
   if (config) {
     const crossSite = rejectCrossSiteMutation(request, config.publicOrigin);
     if (crossSite) return crossSite;
-    const session = readHiggsfieldOAuthSession(config, readOAuthCookies(request));
+    const session = readHiggsfieldOAuthSession(config, readOAuthCookies(request), options.now);
     if (session && options.clearRuntime) {
       await options.clearRuntime(higgsfieldOAuthSessionFingerprint(session));
     }

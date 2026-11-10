@@ -1,59 +1,21 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "bun:test";
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
 
 function normalizeLineEndings(value: string): string {
   return value.replace(/\r\n?/g, "\n");
 }
 
 describe("existing product UI regression boundary", () => {
-  test("keeps the preset layout, copy, controls, tabs, and prompts byte-identical", async () => {
+  test("uses a direct local pose picker for GPT analysis instead of Higgsfield upload", async () => {
     const source = normalizeLineEndings(
       await readFile(new URL("../src/layouts/preset.tsx", import.meta.url), "utf8"),
     );
-    const withoutAllowedConnectionHooks = source
-      .replace('import { HorizonWorkspace } from "./horizon-workspace";\n', "")
-      .replace("  removeGenerationQueries,\n", "")
-      .replace("  disconnectHiggsfieldOAuth,\n", "")
-      .replace(
-        /import \{\n {2}GUEST_SCOPE_KEY,[\s\S]*? {2}uploadAsset,\n\} from "@\/lib\/fnf\.browser";/,
-        'import { GUEST_SCOPE_KEY, getSignInUrl, PRESET_JOBS, uploadAsset } from "@/lib/fnf.browser";',
-      )
-      .replace(/\n {2}useEffect\([\s\S]*?\n\n {2}const history/, "\n  const history")
-      .replace(
-        /\n {2}const selectPose = useCallback[\s\S]*?\n\n {2}const handleUpload/,
-        "\n  const handleUpload",
-      )
-      .replaceAll("selectPose(selected)", "setPose(selected)")
-      .replace("}, [selectPose]);", "}, []);")
-      .replace("onSelect={selectPose}", "onSelect={setPose}")
-      .replace(/\n {18}if \(pose\.ref\?\.id\) \{[\s\S]*?\n {18}\}/, "")
-      .replace("@/lib/profile.browser", "@/lib/profile.functions")
-      .replace('poseMediaId: pose.ref?.id ?? ""', "poseImageUrl: pose.src")
-      .replace(
-        "  const resolvedScopeKey = useFnfScopeKey();\n  const scopeKey = resolvedScopeKey ?? GUEST_SCOPE_KEY;",
-        "  const scopeKey = useFnfScopeKey() ?? GUEST_SCOPE_KEY;",
-      )
-      .replace(
-        /\n {2}const clearInfluencerWorkspace = \(\) => \{[\s\S]*?\n {2}\};\n\n {2}const makeProfile/,
-        "\n  const makeProfile",
-      )
-      .replace(
-        /\n {12}if \(value === "horizon" && \(run\.isRunning \|\| profileBusy\)\) \{[\s\S]*?\n {12}\}/,
-        "",
-      )
-      .replace(
-        /\n {12}<div className="flex min-h-6 items-center justify-center gap-1">[\s\S]*?\n {12}<\/div>/,
-        "",
-      )
-      .replace(/\n {2}if \(mode === "horizon"\) \{\n {4}return <HorizonWorkspace[\s\S]*?\n {2}\}\n\n/, "\n");
-    expect(sha256(withoutAllowedConnectionHooks)).toBe(
-      "fc1b405dc6d1a9edb0dbb9bb0963af619a06a0fd718a3045a9751d6c696ea1e8",
-    );
+    expect(source).toContain('type="file"');
+    expect(source).toContain('accept="image/jpeg,image/png,.jpg,.jpeg,.png"');
+    expect(source).toContain("poseFileInputRef.current?.click()");
+    expect(source).toContain("selectPose(stageLocalPoseAsset(file))");
+    expect(source).toContain("GPT JSON 만들기를 눌러 분석하세요");
+    expect(source).not.toContain("<AssetLibraryModal");
   });
 
   test("adds only the scoped Influencer Higgsfield account controls", async () => {
@@ -153,6 +115,7 @@ describe("existing product UI regression boundary", () => {
     expect(component).toContain('title="현재 연결을 끊고 다른 Higgsfield 계정으로 로그인"');
     expect(component).toContain('title="이 브라우저의 Higgsfield 연결만 해제"');
     expect(component).toContain('accountAction==="reconnect"?"계정 변경 중…":"계정 변경"');
+    expect(component).toContain('accountEmail??"연결된 Higgsfield 계정"');
     expect(component).toContain('accountAction==="disconnect"?"연결 해제 중…":"연결 해제"');
     expect(styles).toContain(".hz-auth-button:hover:not(:disabled)");
     expect(styles).toContain(".hz-auth-button:focus-visible");

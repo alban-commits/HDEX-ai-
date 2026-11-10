@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   callHiggsfieldMcpTool,
+  closeHiggsfieldMcpClient,
   clearHiggsfieldRuntime,
   getHiggsfieldCapabilitySummary,
   HiggsfieldMcpError,
@@ -133,12 +134,57 @@ const tools = [
   },
 ];
 
+const currentTools = [
+  ...tools.filter((tool) => tool.name !== "models_explore" && tool.name !== "job_status"),
+  {
+    name: "models_get",
+    inputSchema: {
+      type: "object",
+      properties: { model_id: { type: "string" } },
+    },
+  },
+  {
+    name: "models_list",
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        limit: { type: "integer" },
+        after: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "models_search",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+    },
+  },
+  {
+    name: "jobs_wait",
+    inputSchema: {
+      type: "object",
+      properties: {
+        jobs: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { index: { type: "integer" }, job_id: { type: "string" } },
+          },
+        },
+        timeout_seconds: { type: "integer" },
+      },
+    },
+  },
+];
+
 function detail(name: "Soul 2" | "GPT Image 2") {
   const soul = name === "Soul 2";
   const aspects = ["9:16", "3:4", "2:3", ...(soul ? [] : ["3:2"]), "1:1", "4:3", "16:9"];
   return {
     id: soul ? "runtime/soul-model" : "runtime/gpt-image-model",
-    name: soul ? "Higgsfield Soul V2" : name,
+    name: soul ? "Higgsfield Soul V2" : "GPT Image 2.6",
     provider_name: soul ? "Higgsfield" : "OpenAI",
     output_type: "image",
     parameters: soul
@@ -163,7 +209,14 @@ function soulDetail(id: string) {
 function canonicalDetail(name: "Soul 2" | "GPT Image 2"): Record<string, unknown> {
   return {
     ...structuredClone(detail(name)),
-    id: name === "Soul 2" ? "soul_v2" : "gpt_image_2",
+    id: name === "Soul 2" ? "soul_v2" : "gpt_image_2_6",
+  };
+}
+
+function currentCanonicalDetail(name: "Soul 2" | "GPT Image 2"): Record<string, unknown> {
+  return {
+    ...canonicalDetail(name),
+    medias: [{ name: "medias", type: "image", roles: ["image"], ...(name === "Soul 2" ? { max: 1 } : {}) }],
   };
 }
 
@@ -247,17 +300,54 @@ async function capturedError(operation: () => Promise<unknown>): Promise<unknown
 }
 
 describe("Higgsfield MCP discovery boundary", () => {
+  test("bounds a provider MCP close that never settles", async () => {
+    let closeCalls = 0;
+    await closeHiggsfieldMcpClient(
+      {
+        close: () => {
+          closeCalls += 1;
+          return new Promise<void>(() => undefined);
+        },
+      },
+      5,
+    );
+    expect(closeCalls).toBe(1);
+  });
+
+  test("accepts the current models_get and jobs_wait MCP contract", async () => {
+    const calls: string[] = [];
+    const record = await inspectHiggsfieldProvider({
+      listTools: async () => ({ tools: currentTools }),
+      callTool: async (name, args) => {
+        calls.push(name);
+        if (name !== "models_get") throw new Error(`unexpected tool: ${name}`);
+        return {
+          structuredContent:
+            args.model_id === "soul_v2"
+              ? currentCanonicalDetail("Soul 2")
+              : currentCanonicalDetail("GPT Image 2"),
+        };
+      },
+    });
+    expect(record.models).toEqual([
+      expect.objectContaining({ key: "soul_2", available: true, mediaRole: "image" }),
+      expect.objectContaining({ key: "gpt_image_2", available: true, mediaRole: "image" }),
+    ]);
+    expect(calls).toEqual(["models_get", "models_get"]);
+    expect(record.tools.some((tool) => tool.name === "jobs_wait")).toBe(true);
+  });
+
   test("discovers Soul 2 and GPT Image 2 from models_explore without a paid create", async () => {
     const { record, calls } = await discoveredRecord();
     expect(
       record.models.map((model) => ({ name: model.displayName, ready: model.available })),
     ).toEqual([
       { name: "Soul 2", ready: true },
-      { name: "GPT Image 2", ready: true },
+      { name: "GPT Image 2.6", ready: true },
     ]);
     expect(record.models.map((model) => model.modelId)).toEqual([
       "soul_v2",
-      "gpt_image_2",
+      "gpt_image_2_6",
     ]);
     expect(record.models[0]).toMatchObject({
       mediaRole: "reference",
@@ -297,7 +387,7 @@ describe("Higgsfield MCP discovery boundary", () => {
               models: [
                 soul
                   ? { id: "soul_v2", name: "Higgsfield Soul V2" }
-                  : { id: "gpt_image_2", name: "GPT Image 2" },
+                  : { id: "gpt_image_2_6", name: "GPT Image 2.6" },
               ],
             },
           };
@@ -311,7 +401,7 @@ describe("Higgsfield MCP discovery boundary", () => {
     expect(record.models[0]).toMatchObject({ available: true });
     expect(record.models[1]).toMatchObject({
       available: true,
-      modelId: "gpt_image_2",
+      modelId: "gpt_image_2_6",
       mediaRole: "provider_image_reference",
       maximumImages: 14,
       resolutionValue: "2k",
@@ -336,7 +426,7 @@ describe("Higgsfield MCP discovery boundary", () => {
               models: [
                 isSoul
                   ? { id: "soul_v2", name: "Higgsfield Soul V2" }
-                  : { id: "gpt_image_2", name: "GPT Image 2" },
+                  : { id: "gpt_image_2_6", name: "GPT Image 2.6" },
               ],
             },
           };
@@ -377,8 +467,8 @@ describe("Higgsfield MCP discovery boundary", () => {
                   soul
                     ? { id: "soul_v2", name: "Higgsfield Soul V2" }
                     : {
-                        id: "gpt_image_2",
-                        name: "GPT Image 2",
+                        id: "gpt_image_2_6",
+                        name: "GPT Image 2.6",
                         provider_name: "OpenAI",
                         output_type: "image",
                       },
@@ -414,7 +504,7 @@ describe("Higgsfield MCP discovery boundary", () => {
               models: [
                 soul
                   ? { id: "soul_v2", name: "Higgsfield Soul V2" }
-                  : { id: "gpt_image_2", name: "GPT Image 2" },
+                  : { id: "gpt_image_2_6", name: "GPT Image 2.6" },
               ],
             },
           };
@@ -505,6 +595,26 @@ describe("Higgsfield MCP discovery boundary", () => {
     expect(record.pageCount).toBe(2);
     expect(record.models.every((model) => !model.available)).toBe(true);
     expect(generateCalls).toBe(0);
+  });
+
+  test("discovers required tools after a provider catalog grows beyond 128 entries", async () => {
+    const filler = Array.from({ length: 142 }, (_, index) => ({
+      name: `provider_tool_${index}`,
+      inputSchema: { type: "object", properties: {} },
+    }));
+    const pages = [filler.slice(0, 100), [...filler.slice(100), ...tools]];
+    const record = await inspectHiggsfieldProvider({
+      now: NOW,
+      listTools: async (cursor) => cursor
+        ? { tools: pages[1]! }
+        : { tools: pages[0]!, nextCursor: "page-2" },
+      callTool: async (_name, args) => ({
+        structuredContent: canonicalDetail(args.model_id === "soul_v2" ? "Soul 2" : "GPT Image 2"),
+      }),
+    });
+    expect(record.toolCount).toBe(147);
+    expect(record.pageCount).toBe(2);
+    expect(record.models.every((model) => model.available)).toBe(true);
   });
 
   test("keeps bounded search and list only as diagnostics after canonical lookup fails", async () => {
@@ -660,11 +770,11 @@ describe("Higgsfield MCP discovery boundary", () => {
     expect(record.models.every((model) => model.available)).toBe(true);
     expect(record.models.map((model) => model.modelId)).toEqual([
       "soul_v2",
-      "gpt_image_2",
+      "gpt_image_2_6",
     ]);
     expect(calls.map((call) => call.args)).toEqual([
       { action: "get", model_id: "soul_v2" },
-      { action: "get", model_id: "gpt_image_2" },
+      { action: "get", model_id: "gpt_image_2_6" },
     ]);
     expect(new Set(calls.map((call) => call.name))).toEqual(new Set(["models_explore"]));
   });
@@ -726,7 +836,7 @@ describe("Higgsfield MCP discovery boundary", () => {
         },
       });
       expect(record.models[0]).toMatchObject({ available: false, reason: "profile_invalid" });
-      expect(record.models[1]).toMatchObject({ available: true, modelId: "gpt_image_2" });
+      expect(record.models[1]).toMatchObject({ available: true, modelId: "gpt_image_2_6" });
       expect(calls.filter((call) => call.args.action === "get")).toHaveLength(2);
       expect(calls.some((call) => call.args.model_id === "soul_2")).toBe(false);
       expect(calls.some((call) => call.args.model_id === "soul_cinematic")).toBe(false);
@@ -787,9 +897,8 @@ describe("Higgsfield MCP discovery boundary", () => {
     ).rejects.toMatchObject({ reason: "capability_required" });
   });
 
-  test("maps Soul UI 1080p to canonical MCP quality 2k for the explicit generation attempt", async () => {
+  test("submits Soul directly without a capability-cache warmup and maps 1080p to MCP quality 2k", async () => {
     const fingerprint = "generation-session";
-    await seed(fingerprint);
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const jobs = await createHiggsfieldGeneration({
       fingerprint,
@@ -830,7 +939,38 @@ describe("Higgsfield MCP discovery boundary", () => {
         aspect_ratio: "1:1",
         quality: "2k",
         medias: [],
+        use_unlim: false,
       },
+    });
+    const completed = await getHiggsfieldGeneration({
+      fingerprint,
+      session,
+      jobId: "provider-job-1",
+      env: GENERATION_ENV,
+      now: NOW,
+      callTool: async (name, args) => {
+        calls.push({ name, args });
+        return {
+          jobs: [
+            {
+              job_id: "provider-job-1",
+              status: "completed",
+              result_url: "https://cdn.higgsfield.ai/private/result-1",
+            },
+          ],
+        };
+      },
+    });
+    expect(calls[1]).toEqual({
+      name: "jobs_wait",
+      args: {
+        jobs: [{ index: 0, job_id: "provider-job-1" }],
+        timeout_seconds: 0,
+      },
+    });
+    expect(completed).toMatchObject({
+      status: "completed",
+      result_url: "/api/higgsfield/result/provider-job-1",
     });
     await clearGenerationRuntime(fingerprint, GENERATION_ENV);
     clearHiggsfieldRuntime(fingerprint);
@@ -900,6 +1040,46 @@ describe("Higgsfield MCP discovery boundary", () => {
       await clearGenerationRuntime(scenario.fingerprint, GENERATION_ENV);
       clearHiggsfieldRuntime(scenario.fingerprint);
     }
+  });
+
+  test("explicitly spends credits and reports an unexpected unlimited-choice response without retry", async () => {
+    const fingerprint = "generation-unlim-choice-session";
+    await seed(fingerprint);
+    let creates = 0;
+    const error = await capturedError(() =>
+      createHiggsfieldGeneration({
+        fingerprint,
+        session,
+        jobSetType: "text2image_soul_v2",
+        params: {
+          prompt: "one person in a studio",
+          batch_size: 1,
+          aspect_ratio: "1:1",
+          quality: "1080p",
+          medias: [],
+        },
+        confirmationToken: "request-unlim-choice-0001",
+        env: GENERATION_ENV,
+        callTool: async (_name, args) => {
+          creates += 1;
+          expect(args).toMatchObject({ params: { use_unlim: false } });
+          return {
+            structuredContent: {
+              unlim_choice: {
+                model: "soul_v2",
+                message: "private provider choice text",
+              },
+            },
+          };
+        },
+        now: NOW,
+      }),
+    );
+    expect(error).toMatchObject({ code: "payment_choice_required", status: 409 });
+    expect(JSON.stringify(error)).not.toContain("private provider choice text");
+    expect(creates).toBe(1);
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
   });
 
   test("accepts the provider, public, and strict omitted Soul model lineages", async () => {
@@ -1000,10 +1180,10 @@ describe("Higgsfield MCP discovery boundary", () => {
       callTool: async (name, args) => {
         creates += 1;
         expect(name).toBe("generate_image");
-        expect(args).toMatchObject({ params: { model: "gpt_image_2" } });
+        expect(args).toMatchObject({ params: { model: "gpt_image_2_6", use_unlim: false } });
         return {
           structuredContent: {
-            results: [{ id: "provider-gpt-lineage-1", model: "gpt_image_2", status: "queued" }],
+            results: [{ id: "provider-gpt-lineage-1", model: "gpt_image_2_6", status: "queued" }],
           },
         };
       },
@@ -1256,8 +1436,8 @@ describe("Higgsfield MCP discovery boundary", () => {
       {
         name: "validation",
         text: "Invalid required parameter prompt=private prompt file://private/path",
-        expectedCode: "provider_failure",
-        expectedStatus: 502,
+        expectedCode: "provider_validation",
+        expectedStatus: 422,
         rejectionClass: "validation",
       },
     ] as const) {
@@ -1310,6 +1490,75 @@ describe("Higgsfield MCP discovery boundary", () => {
       expect(serialized).not.toContain("private.example");
       expect(serialized).not.toContain("private prompt");
       expect(serialized).not.toContain("private/path");
+      await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+      clearHiggsfieldRuntime(fingerprint);
+    }
+  });
+
+  test("classifies structured and JSON tool errors without exposing provider details", async () => {
+    for (const scenario of [
+      {
+        name: "structured-permission",
+        response: {
+          isError: true,
+          structuredContent: {
+            error: { message: "Access denied for private-account-id" },
+          },
+        },
+        expectedCode: "provider_permission",
+        expectedStatus: 403,
+        responseShape: "structured",
+        rejectionClass: "permission",
+      },
+      {
+        name: "json-moderation",
+        response: {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ detail: "Content policy blocked private-prompt" }),
+            },
+          ],
+        },
+        expectedCode: "provider_moderation",
+        expectedStatus: 422,
+        responseShape: "json_text",
+        rejectionClass: "moderation",
+      },
+    ] as const) {
+      const fingerprint = `generation-${scenario.name}-session`;
+      await seed(fingerprint);
+      const diagnostics: unknown[] = [];
+      const error = await capturedError(() =>
+        createHiggsfieldGeneration({
+          fingerprint,
+          session,
+          jobSetType: "text2image_soul_v2",
+          params: {
+            prompt: "one person in a studio",
+            batch_size: 1,
+            aspect_ratio: "1:1",
+            quality: "1080p",
+            medias: [],
+          },
+          confirmationToken: `request-${scenario.name}-0001`,
+          env: GENERATION_ENV,
+          callTool: async () => scenario.response,
+          onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+          now: NOW,
+        }),
+      );
+      expect(error).toMatchObject({ code: scenario.expectedCode, status: scenario.expectedStatus });
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          responseShape: scenario.responseShape,
+          rejectionClass: scenario.rejectionClass,
+          toolErrorPresent: true,
+        }),
+      ]);
+      expect(JSON.stringify({ error, diagnostics })).not.toContain("private-account-id");
+      expect(JSON.stringify({ error, diagnostics })).not.toContain("private-prompt");
       await clearGenerationRuntime(fingerprint, GENERATION_ENV);
       clearHiggsfieldRuntime(fingerprint);
     }
@@ -1691,6 +1940,7 @@ describe("Higgsfield MCP discovery boundary", () => {
       count: 1,
       aspect_ratio: "1:1",
       quality: "2k",
+      use_unlim: false,
       medias: [],
     };
     const requestHash = generationRequestHash({
@@ -1841,7 +2091,7 @@ describe("Higgsfield MCP discovery boundary", () => {
         return {
           structuredContent: {
             results: [
-              { id: "provider-gpt-wrapped-media-1", model: "gpt_image_2", status: "queued" },
+              { id: "provider-gpt-wrapped-media-1", model: "gpt_image_2_6", status: "queued" },
             ],
           },
         };
@@ -1853,7 +2103,7 @@ describe("Higgsfield MCP discovery boundary", () => {
     ]);
     expect(creates).toBe(1);
     expect(providerParams).toMatchObject({
-      model: "gpt_image_2",
+      model: "gpt_image_2_6",
       medias: [{ role: "reference", value: "confirmed-gpt-media-1" }],
     });
     await clearGenerationRuntime(fingerprint, GENERATION_ENV);
@@ -2227,7 +2477,96 @@ describe("Higgsfield MCP discovery boundary", () => {
     clearHiggsfieldRuntime(fingerprint);
   });
 
-  test("clears sealed cookies, capability cache, and generation TTL state after MCP 401/403", async () => {
+  test("accepts provider-normalized JPEG content types for signed uploads", async () => {
+    const fingerprint = "upload-jpeg-content-type";
+    await seed(fingerprint);
+    let sentType = "";
+    await uploadHiggsfieldImage({
+      session,
+      fingerprint,
+      filename: "pose.jpg",
+      contentType: "image/jpeg",
+      bytes: new Uint8Array([255, 216, 255]),
+      callTool: async (name) => name === "media_upload"
+        ? { uploads: [{ media_id: "jpeg-media", upload_url: "https://uploads.example/put", method: "PUT", content_type: "image/jpg" }] }
+        : { results: [{ media_id: "jpeg-media", status: "confirmed" }] },
+      uploadFetch: async (_url, init) => {
+        sentType = new Headers(init?.headers).get("content-type") ?? "";
+        return new Response(null, { status: 200 });
+      },
+      env: GENERATION_ENV,
+    });
+    expect(sentType).toBe("image/jpeg");
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("accepts a confirmed upload when the signed PUT response is lost", async () => {
+    const fingerprint = "upload-confirm-after-network-loss";
+    await seed(fingerprint);
+    const events: string[] = [];
+    const result = await uploadHiggsfieldImage({
+      session,
+      fingerprint,
+      filename: "detail.jpg",
+      contentType: "image/jpeg",
+      bytes: new Uint8Array([255, 216, 255]),
+      callTool: async (name) => {
+        events.push(name);
+        return name === "media_upload"
+          ? { uploads: [{ media_id: "confirmed-after-loss", upload_url: "https://uploads.example/put", method: "PUT", content_type: "image/jpeg" }] }
+          : { results: [{ media_id: "confirmed-after-loss", status: "uploaded" }] };
+      },
+      uploadFetch: async () => {
+        events.push("signed_put");
+        throw new TypeError("socket closed after upload");
+      },
+      env: GENERATION_ENV,
+    });
+    expect(result).toEqual({ id: "confirmed-after-loss", type: "image" });
+    expect(events).toEqual(["media_upload", "signed_put", "media_confirm"]);
+    expect(await hasGenerationMedia({
+      sessionFingerprint: fingerprint,
+      mediaIds: ["confirmed-after-loss"],
+      env: GENERATION_ENV,
+    })).toBe(true);
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("sends the conditional header required by current Higgsfield MCP upload URLs", async () => {
+    const fingerprint = "upload-if-none-match";
+    await seed(fingerprint);
+    let sentHeaders = new Headers();
+    await uploadHiggsfieldImage({
+      session,
+      fingerprint,
+      filename: "pose.png",
+      contentType: "image/png",
+      bytes: new Uint8Array([137, 80, 78, 71]),
+      callTool: async (name) => name === "media_upload"
+        ? {
+            uploads: [{
+              media_id: "conditional-media",
+              upload_url: "https://upload.higgsfield.ai/put?X-Amz-SignedHeaders=content-type%3Bhost%3Bif-none-match",
+              method: "PUT",
+              content_type: "image/png",
+            }],
+          }
+        : { results: [{ media_id: "conditional-media", status: "confirmed" }] },
+      uploadFetch: async (_url, init) => {
+        sentHeaders = new Headers(init?.headers);
+        return new Response(null, { status: 200 });
+      },
+      env: GENERATION_ENV,
+    });
+    expect(sentHeaders.get("content-type")).toBe("image/png");
+    expect(sentHeaders.get("if-none-match")).toBe("*");
+    await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+    clearHiggsfieldRuntime(fingerprint);
+  });
+
+  test("clears capability cache and generation TTL state after MCP 401/403 without touching browser cookies", async () => {
     const fingerprint = "authentication-failure-session";
     await seed(fingerprint);
     await createHiggsfieldGeneration({
@@ -2250,9 +2589,7 @@ describe("Higgsfield MCP discovery boundary", () => {
     });
     const error = new HiggsfieldMcpError("authentication_failed");
     expect(isHiggsfieldAuthenticationFailure(error)).toBe(true);
-    const headers = new Headers();
     await invalidateHiggsfieldAuthentication({
-      headers,
       sessionFingerprint: fingerprint,
       env: GENERATION_ENV,
     });
@@ -2263,7 +2600,6 @@ describe("Higgsfield MCP discovery boundary", () => {
     expect(
       (await listHiggsfieldGenerations({ fingerprint, env: GENERATION_ENV, now: NOW })).items,
     ).toEqual([]);
-    expect(headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
   test("does not repopulate generation state from a create flight invalidated by reconnect", async () => {
@@ -2298,7 +2634,6 @@ describe("Higgsfield MCP discovery boundary", () => {
     });
     await entered;
     await invalidateHiggsfieldAuthentication({
-      headers: new Headers(),
       sessionFingerprint: fingerprint,
       env: GENERATION_ENV,
     });

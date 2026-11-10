@@ -127,12 +127,11 @@ export async function validatePublicHttpsTarget(
   };
 }
 
-function pinnedLookup(addresses: readonly PublicAddress[]): LookupFunction {
-  const pinned = addresses.map((entry) => ({ ...entry }));
-  const selected = pinned[0]!;
+function pinnedLookup(address: PublicAddress): LookupFunction {
+  const selected = { ...address };
   return (_hostname, options, callback) => {
     if (options.all === true) {
-      callback(null, pinned.map((entry) => ({ ...entry })));
+      callback(null, [{ ...selected }]);
       return;
     }
     callback(null, selected.address, selected.family);
@@ -154,23 +153,40 @@ export async function requestPinnedHttps(input: {
   signal: AbortSignal;
 }): Promise<PinnedHttpsResponse> {
   const target = await validatePublicHttpsTarget(input.url);
+  let lastError: unknown;
+  for (const address of target.addresses) {
+    if (input.signal.aborted) throw input.signal.reason;
+    try {
+      return await requestPinnedAddress(input, target.url, address);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error("https_connection_failed");
+}
+
+function requestPinnedAddress(
+  input: Parameters<typeof requestPinnedHttps>[0],
+  url: URL,
+  address: PublicAddress,
+): Promise<PinnedHttpsResponse> {
   return new Promise((resolve, reject) => {
     const options: RequestOptions = {
       protocol: "https:",
-      hostname: target.url.hostname,
+      hostname: url.hostname,
       port: 443,
-      path: `${target.url.pathname}${target.url.search}`,
+      path: `${url.pathname}${url.search}`,
       method: input.method,
       headers: {
-        Host: target.url.hostname,
+        Host: url.hostname,
         ...input.headers,
         ...(input.body ? { "Content-Length": String(input.body.byteLength) } : {}),
       },
-      servername: target.url.hostname,
+      servername: url.hostname,
       rejectUnauthorized: true,
       agent: false,
       signal: input.signal,
-      lookup: pinnedLookup(target.addresses),
+      lookup: pinnedLookup(address),
     };
     const request = httpsRequest(options, (response) => {
       const chunks: Uint8Array[] = [];

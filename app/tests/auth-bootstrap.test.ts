@@ -1,14 +1,18 @@
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 import {
   fetchCurrentUser,
   fnfBrowserAdapter,
   getReconnectSignInUrl,
+  clearStaleHiggsfieldOAuthError,
+  getHiggsfieldOAuthCallbackMessage,
   getFnfScopeKey,
   getLocalUploadFile,
   getSignInUrl,
   GUEST_SCOPE_KEY,
+  inspectHiggsfieldOAuthCapabilities,
   releaseAllLocalUploads,
   releaseLocalUpload,
+  stageLocalPoseAsset,
   subscribeHiggsfieldReconnect,
   uploadAsset,
 } from "../src/lib/fnf.browser";
@@ -65,6 +69,51 @@ test("opens the public app under a guest scope", async () => {
   }
 });
 
+test("verifies the live Higgsfield MCP tools and models before generation", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    expect(input).toBe("/api/higgsfield/oauth/capabilities");
+    expect(init?.method).toBe("POST");
+    expect(init?.credentials).toBe("include");
+    return appJson({
+      ok: true,
+      capability: {
+        status: "ready",
+        models: [{ key: "soul-2", name: "Soul 2", ready: true }],
+      },
+    });
+  };
+  try {
+    await expect(inspectHiggsfieldOAuthCapabilities()).resolves.toMatchObject({
+      status: "ready",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("requests account reconnection when MCP capability verification rejects OAuth", async () => {
+  const originalFetch = globalThis.fetch;
+  let notifications = 0;
+  const unsubscribe = subscribeHiggsfieldReconnect(() => {
+    notifications += 1;
+  });
+  globalThis.fetch = async () =>
+    appJson(
+      { ok: false, reason: "oauth_required", reconnectRequired: true },
+      { status: 401 },
+    );
+  try {
+    await expect(inspectHiggsfieldOAuthCapabilities()).rejects.toMatchObject({
+      code: "oauth_required",
+    });
+    expect(notifications).toBe(1);
+  } finally {
+    unsubscribe();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("sends only guests through the app auth route", () => {
   expect(getSignInUrl(GUEST_SCOPE_KEY, "/presets?tab=popular")).toBe(
     "/api/higgsfield/oauth/connect?return=%2Fpresets%3Ftab%3Dpopular",
@@ -74,8 +123,35 @@ test("sends only guests through the app auth route", () => {
     "/api/higgsfield/oauth/connect?return=%2F",
   );
   expect(getReconnectSignInUrl("/presets?tab=history")).toBe(
-    "/api/higgsfield/oauth/connect?return=%2Fpresets%3Ftab%3Dhistory",
+    "/api/higgsfield/oauth/connect?return=%2Fpresets%3Ftab%3Dhistory&account=change",
   );
+});
+
+test("clears a stale OAuth callback error after a valid session is restored", () => {
+  const originalWindow = globalThis.window;
+  const replaceState = mock(() => undefined);
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { href: "https://hdex-ai.dfcorp.shop/?higgsfield=error&reason=state_invalid" },
+      history: { state: null, replaceState },
+    },
+  });
+  try {
+    clearStaleHiggsfieldOAuthError();
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
+  }
+});
+
+test("explains an incomplete OAuth reconnection from the callback URL", () => {
+  expect(
+    getHiggsfieldOAuthCallbackMessage(
+      "https://hdex-ai.dfcorp.shop/?higgsfield=error&reason=state_invalid",
+    ),
+  ).toBe("Higgsfield 재연결이 완료되지 않았습니다. 계정 연결을 다시 시작해 주세요.");
+  expect(getHiggsfieldOAuthCallbackMessage("https://hdex-ai.dfcorp.shop/")).toBeNull();
 });
 
 test("mints a fresh single-use confirmation token for every explicit submit", async () => {
@@ -88,7 +164,7 @@ test("mints a fresh single-use confirmation token for every explicit submit", as
   expect(second).not.toBe(first);
 });
 
-test("normalizes uploaded image refs before they reach generation input", async () => {
+test("accepts a strict upload response when the proxy strips its app header", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     expect(input).toBe("/api/media/upload");
@@ -98,7 +174,7 @@ test("normalizes uploaded image refs before they reach generation input", async 
     const headers = new Headers(init?.headers);
     expect(headers.get("accept")).toBe("application/json");
     expect(headers.get("content-type")).toBeNull();
-    return appJson({
+    return Response.json({
       ok: true,
       ref: {
         id: "97cf1fec-77a9-4627-a3d4-23a09ea8aaa4",
@@ -117,6 +193,27 @@ test("normalizes uploaded image refs before they reach generation input", async 
       },
     });
     expect(asset.src.startsWith("blob:")).toBe(true);
+    expect(getLocalUploadFile(asset.ref!.id)).toBe(file);
+  } finally {
+    releaseAllLocalUploads();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("keeps influencer pose files local until GPT prompt analysis", () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("local pose staging must not call Higgsfield upload");
+  };
+
+  try {
+    const file = new File(["pose"], "pose.jpg", { type: "image/jpeg" });
+    const asset = stageLocalPoseAsset(file);
+    expect(fetchCalls).toBe(0);
+    expect(asset.ref).toMatchObject({ type: "media_input" });
+    expect(asset.ref?.id).toStartWith("local-pose-");
     expect(getLocalUploadFile(asset.ref!.id)).toBe(file);
   } finally {
     releaseAllLocalUploads();
@@ -216,13 +313,43 @@ test("distinguishes an Access redirect without following or exposing its URL", a
   }
 });
 
-test("rejects an unmarked JSON response before reading its body", async () => {
+test("accepts a bounded strict adapter success when the proxy strips its header and body marker", async () => {
   const originalFetch = globalThis.fetch;
   const response = Response.json({
     ok: true,
-    value: { private_token: "private-body" },
-    [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+    value: { id: "headerless-success" },
   });
+  globalThis.fetch = async () => response;
+  try {
+    await expect(fnfBrowserAdapter.getUser()).resolves.toEqual({ id: "headerless-success" });
+    expect(response.bodyUsed).toBe(true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("accepts a strict upload envelope when a proxy rewrites JSON as plain text", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        ok: true,
+        ref: { id: "plain-text-media", type: "image" },
+      }),
+      { status: 200, headers: { "content-type": "text/plain; charset=utf-8" } },
+    );
+  try {
+    const asset = await uploadAsset(new File(["image"], "proxy.png", { type: "image/png" }));
+    expect(asset.ref).toEqual({ id: "plain-text-media", type: "media_input" });
+  } finally {
+    releaseAllLocalUploads();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects headerless JSON that does not match the strict adapter envelope", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = Response.json({ ok: true, private_token: "private-body" });
   globalThis.fetch = async () => response;
   try {
     const thrown = await caught(() => fnfBrowserAdapter.getUser());
@@ -236,27 +363,78 @@ test("rejects an unmarked JSON response before reading its body", async () => {
         failureStage: "app_header_missing",
       },
     });
-    expect(response.bodyUsed).toBe(false);
+    expect(response.bodyUsed).toBe(true);
     expect(JSON.stringify(thrown)).not.toContain("private-body");
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("accepts only a bounded sentinel-marked adapter error without the response header", async () => {
+test("classifies a headerless Cloudflare-style HTML response as an expired access session", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = new Response("<!doctype html><p>private-login-page</p>", {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+  globalThis.fetch = async () => response;
+  try {
+    const thrown = await caught(() => fnfBrowserAdapter.getUser());
+    expect(thrown).toMatchObject({
+      code: "access_session_required",
+      data: {
+        httpStatus: 200,
+        contentType: "text/html",
+        appResponseHeaderMatches: false,
+        failureStage: "app_header_missing",
+      },
+    });
+    expect(response.bodyUsed).toBe(false);
+    expect(JSON.stringify(thrown)).not.toContain("private-login-page");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("separates a headerless gateway failure from an app contract failure", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = new Response("<!doctype html><p>private-proxy-error</p>", {
+    status: 502,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+  globalThis.fetch = async () => response;
+  try {
+    const thrown = await caught(() => fnfBrowserAdapter.getUser());
+    expect(thrown).toMatchObject({
+      code: "adapter_gateway_unavailable",
+      status: 502,
+      data: {
+        httpStatus: 502,
+        contentType: "text/html",
+        appResponseHeaderMatches: false,
+        failureStage: "app_header_missing",
+      },
+    });
+    expect(response.bodyUsed).toBe(false);
+    expect(JSON.stringify(thrown)).not.toContain("private-proxy-error");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("accepts a bounded strict adapter error without its header or body marker", async () => {
   const originalFetch = globalThis.fetch;
   const valid = Response.json(
     {
       ok: false,
       error: { code: "outcome_unknown", message: "생성 결과를 확인할 수 없습니다.", status: 502 },
-      [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
     },
     { status: 502 },
   );
-  const missingSentinel = Response.json(
+  const invalidEnvelope = Response.json(
     {
       ok: false,
       error: { code: "private-error", message: "private response body", status: 502 },
+      private_token: "private-envelope",
     },
     { status: 502 },
   );
@@ -269,12 +447,12 @@ test("accepts only a bounded sentinel-marked adapter error without the response 
     { status: 502, headers: { "content-type": "application/json" } },
   );
   let index = 0;
-  globalThis.fetch = async () => [valid, missingSentinel, oversized][index++]!;
+  globalThis.fetch = async () => [valid, invalidEnvelope, oversized][index++]!;
   try {
     const accepted = await caught(() => fnfBrowserAdapter.getUser());
     expect(accepted).toMatchObject({ code: "outcome_unknown", status: 502 });
 
-    for (const response of [missingSentinel, oversized]) {
+    for (const response of [invalidEnvelope, oversized]) {
       const rejected = await caught(() => fnfBrowserAdapter.getUser());
       expect(rejected).toMatchObject({
         code: "adapter_non_app_response",
@@ -389,7 +567,7 @@ test("separates upload Access redirects and unmarked HTML without exposing eithe
       uploadAsset(new File(["image"], "html.png", { type: "image/png" })),
     );
     expect(htmlError).toMatchObject({
-      code: "adapter_non_app_response",
+      code: "adapter_gateway_unavailable",
       data: { contentType: "text/html", appResponseHeaderMatches: false },
     });
     expect(responses[1]?.bodyUsed).toBe(false);
@@ -446,7 +624,7 @@ test("separates profile Access redirects and unmarked HTML without exposing Form
 
     const htmlError = await caught(() => composeInfluencerProfile(input));
     expect(htmlError).toMatchObject({
-      code: "adapter_non_app_response",
+      code: "adapter_gateway_unavailable",
       data: { contentType: "text/html", appResponseHeaderMatches: false },
     });
     expect(responses[1]?.bodyUsed).toBe(false);

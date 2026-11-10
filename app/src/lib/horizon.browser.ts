@@ -27,9 +27,11 @@ type HorizonUploadOperations = {
   optimize?: (file: File) => Promise<File>;
 };
 
-export const HORIZON_UPLOAD_TARGET_BYTES = 18 * 1024 * 1024;
-export const HORIZON_UPLOAD_TARGET_PIXELS = 30_000_000;
-export const HORIZON_UPLOAD_MAX_EDGE = 6_000;
+// Keep each of Horizon's many references comfortably below the provider's
+// 20 MB ceiling while retaining enough detail for garment analysis.
+export const HORIZON_UPLOAD_TARGET_BYTES = 8 * 1024 * 1024;
+export const HORIZON_UPLOAD_TARGET_PIXELS = 16_000_000;
+export const HORIZON_UPLOAD_MAX_EDGE = 4_096;
 
 type HorizonDecodedImage = {
   width: number;
@@ -185,7 +187,7 @@ export async function composeHorizonPrompt(input: { brief: string; ratio: string
     categories.push(image.category);
   }
   form.set("data", JSON.stringify({ brief: input.brief, ratio: input.ratio, targetView: input.targetView, categories }));
-  const result = await fetchAppJson<HorizonPromptResponse>({ path: "/api/openai/horizon", init: { method: "POST", credentials: "include", body: form }, isEnvelope: isResponse });
+  const result = await fetchAppJson<HorizonPromptResponse>({ path: "/api/openai/horizon", init: { method: "POST", credentials: "include", body: form }, isEnvelope: isResponse, allowHeaderlessEnvelope: true });
   if (!result.ok && result.code === "oauth_required") notifyHiggsfieldReconnectRequired();
   return result;
 }

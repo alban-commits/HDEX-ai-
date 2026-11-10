@@ -6,9 +6,10 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { HiggsfieldOAuthSession } from "./higgsfield-oauth.server";
 
 export const HIGGSFIELD_MCP_TIMEOUT_MS = 25_000;
+export const HIGGSFIELD_MCP_CLOSE_TIMEOUT_MS = 1_000;
 export const HIGGSFIELD_MCP_MAX_RESPONSE_BYTES = 1024 * 1024;
-export const HIGGSFIELD_MCP_MAX_PAGES = 4;
-export const HIGGSFIELD_MCP_MAX_TOOLS = 128;
+export const HIGGSFIELD_MCP_MAX_PAGES = 8;
+export const HIGGSFIELD_MCP_MAX_TOOLS = 256;
 export const HIGGSFIELD_MODEL_MAX_PAGES = 3;
 export const HIGGSFIELD_MODEL_MAX_ITEMS = 300;
 export const HIGGSFIELD_CAPABILITY_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -30,11 +31,11 @@ const MODEL_TARGETS = [
   {
     key: "gpt_image_2",
     canonicalJobSetType: "gpt_image_2",
-    providerModelId: "gpt_image_2",
-    searchName: "GPT Image 2",
-    displayName: "GPT Image 2",
+    providerModelId: "gpt_image_2_6",
+    searchName: "GPT Image 2.6",
+    displayName: "GPT Image 2.6",
     providerName: "OpenAI",
-    aliases: ["GPT Image 2", "OpenAI GPT Image 2", "GPT Image 2 OpenAI"],
+    aliases: ["GPT Image 2.6", "OpenAI GPT Image 2.6", "GPT Image 2.6 OpenAI"],
     aspects: ["9:16", "3:4", "2:3", "3:2", "1:1", "4:3", "16:9"],
     resolution: "2k",
     qualities: ["high"],
@@ -56,14 +57,21 @@ const MODEL_TARGETS = [
     maximumImages: 14,
   },
 ] as const;
-const REQUIRED_TOOLS = [
-  "models_explore",
+const CORE_REQUIRED_TOOLS = [
   "media_upload",
   "media_confirm",
   "generate_image",
-  "job_status",
 ] as const;
-export type HiggsfieldMcpToolName = (typeof REQUIRED_TOOLS)[number];
+const SUPPORTED_TOOLS = [
+  ...CORE_REQUIRED_TOOLS,
+  "models_explore",
+  "models_get",
+  "models_list",
+  "models_search",
+  "job_status",
+  "jobs_wait",
+] as const;
+export type HiggsfieldMcpToolName = (typeof SUPPORTED_TOOLS)[number];
 
 type JsonSchema = {
   type?: string | string[];
@@ -258,6 +266,24 @@ async function boundedResponse(response: Response): Promise<Response> {
   });
 }
 
+export async function closeHiggsfieldMcpClient(
+  client: Pick<Client, "close">,
+  timeoutMs = HIGGSFIELD_MCP_CLOSE_TIMEOUT_MS,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  try {
+    await Promise.race([
+      client.close().catch(() => undefined),
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function withOfficialMcpClient<T>(input: {
   mcpUrl: string;
   accessToken: string;
@@ -324,7 +350,10 @@ async function withOfficialMcpClient<T>(input: {
     throw new HiggsfieldMcpError("invalid_response");
   } finally {
     clearTimeout(timer);
-    await client.close().catch(() => undefined);
+    // A provider transport can leave its DELETE/session-close request hanging
+    // after the actual tool call has settled. Never let cleanup hold the HTTP
+    // route open until the reverse proxy replaces our JSON with a gateway 502.
+    await closeHiggsfieldMcpClient(client);
   }
 }
 
@@ -354,6 +383,10 @@ function hasType(schema: JsonSchema | undefined, expected: string): boolean {
   );
 }
 
+function hasNumericType(schema: JsonSchema | undefined): boolean {
+  return hasType(schema, "number") || hasType(schema, "integer");
+}
+
 function enumIncludes(schema: JsonSchema | undefined, expected: string): boolean {
   return Array.isArray(schema?.enum) && schema.enum.includes(expected);
 }
@@ -369,6 +402,11 @@ function toolContractValid(tool: DiscoveredTool): boolean {
       enumIncludes(properties.action, "list")
     );
   }
+  if (tool.name === "models_get") return hasType(properties.model_id, "string");
+  if (tool.name === "models_list") {
+    return hasType(properties.type, "string") && hasNumericType(properties.limit);
+  }
+  if (tool.name === "models_search") return hasType(properties.query, "string");
   if (tool.name === "media_upload") {
     const files = properties.files;
     return (
@@ -387,6 +425,15 @@ function toolContractValid(tool: DiscoveredTool): boolean {
     );
   }
   if (tool.name === "job_status") return hasType(properties.jobId, "string");
+  if (tool.name === "jobs_wait") {
+    const jobs = properties.jobs;
+    return (
+      hasType(jobs, "array") &&
+      hasType(jobs.items, "object") &&
+      hasNumericType(jobs.items?.properties?.index) &&
+      hasType(jobs.items?.properties?.job_id, "string")
+    );
+  }
   if (tool.name === "generate_image") {
     const params = properties.params;
     return Boolean(params && executableObjectBranches(params).length > 0);
@@ -509,7 +556,10 @@ export function parseHiggsfieldMcpContent(
       content: value.structuredContent as Record<string, unknown>,
       isError: value.isError === true,
       responseShape: "structured",
-      rejectionClass: "unknown",
+      rejectionClass:
+        value.isError === true
+          ? classifyHiggsfieldProviderRejection(JSON.stringify(value.structuredContent))
+          : "unknown",
     };
   }
   if (value.structuredContent !== undefined && value.structuredContent !== null) {
@@ -584,7 +634,10 @@ export function parseHiggsfieldMcpContent(
     content: candidates[0]!,
     isError: value.isError === true,
     responseShape: "json_text",
-    rejectionClass: "unknown",
+    rejectionClass:
+      value.isError === true
+        ? classifyHiggsfieldProviderRejection(JSON.stringify(candidates[0]))
+        : "unknown",
   };
 }
 
@@ -869,6 +922,7 @@ function buildModelProfile(input: {
   candidate: SearchModel;
   detail?: Record<string, unknown>;
   generateTool?: DiscoveredTool;
+  canonicalMediaRole?: boolean;
 }): DiscoveredModelProfile {
   if (!input.detail) {
     return { ...modelIdentity(input.target), available: false, reason: "profile_invalid" };
@@ -910,7 +964,14 @@ function buildModelProfile(input: {
         .map((value) => safeText(value, 32))
         .filter((value): value is string => Boolean(value))
     : [];
-  const media = mediaContract(input.detail);
+  const discoveredMedia = mediaContract(input.detail);
+  const media =
+    input.canonicalMediaRole &&
+    discoveredMedia.role &&
+    input.generateTool &&
+    toolMediaContract(input.generateTool, "image")
+      ? { ...discoveredMedia, role: "image" }
+      : discoveredMedia;
   const mappings = productInputMappings({
     target: input.target,
     parameters,
@@ -952,7 +1013,10 @@ function buildModelProfile(input: {
 
 export async function inspectHiggsfieldProvider(input: {
   listTools: (cursor?: string) => Promise<{ tools: unknown[]; nextCursor?: string }>;
-  callTool: (name: "models_explore", args: Record<string, unknown>) => Promise<unknown>;
+  callTool: (
+    name: "models_explore" | "models_get" | "models_list" | "models_search",
+    args: Record<string, unknown>,
+  ) => Promise<unknown>;
   now?: number;
   includeNano?: boolean;
 }): Promise<HiggsfieldCapabilityRecord> {
@@ -979,12 +1043,19 @@ export async function inspectHiggsfieldProvider(input: {
     cursors.add(page.nextCursor);
     cursor = page.nextCursor;
   }
-  const requiredToolsReady =
-    enumerationComplete &&
-    REQUIRED_TOOLS.every((name) => {
+  const hasValidTool = (name: string) => {
       const matching = tools.filter((tool) => tool.name === name);
       return matching.length === 1 && toolContractValid(matching[0]!);
-    });
+  };
+  const legacyModels = hasValidTool("models_explore");
+  const currentModels = hasValidTool("models_get");
+  const legacyStatus = hasValidTool("job_status");
+  const currentStatus = hasValidTool("jobs_wait");
+  const requiredToolsReady =
+    enumerationComplete &&
+    CORE_REQUIRED_TOOLS.every(hasValidTool) &&
+    (legacyModels || currentModels) &&
+    (legacyStatus || currentStatus);
   const generateTool = tools.find((tool) => tool.name === "generate_image");
   const models: DiscoveredModelProfile[] = [];
   let listedModels: SearchModel[] | undefined;
@@ -998,12 +1069,18 @@ export async function inspectHiggsfieldProvider(input: {
       page < HIGGSFIELD_MODEL_MAX_PAGES && listedModels.length < HIGGSFIELD_MODEL_MAX_ITEMS;
       page += 1
     ) {
-      const response = await input.callTool("models_explore", {
-        action: "list",
-        type: "image",
-        limit: 100,
-        ...(nextCursor ? { after: nextCursor } : {}),
-      });
+      const response = legacyModels
+        ? await input.callTool("models_explore", {
+            action: "list",
+            type: "image",
+            limit: 100,
+            ...(nextCursor ? { after: nextCursor } : {}),
+          })
+        : await input.callTool("models_list", {
+            type: "image",
+            limit: 100,
+            ...(nextCursor ? { after: nextCursor } : {}),
+          });
       listedModels.push(
         ...modelItems(response).slice(0, HIGGSFIELD_MODEL_MAX_ITEMS - listedModels.length),
       );
@@ -1026,10 +1103,12 @@ export async function inspectHiggsfieldProvider(input: {
     try {
       canonicalDetail =
         detailRecord(
-          await input.callTool("models_explore", {
-            action: "get",
-            model_id: target.providerModelId,
-          }),
+          legacyModels
+            ? await input.callTool("models_explore", {
+                action: "get",
+                model_id: target.providerModelId,
+              })
+            : await input.callTool("models_get", { model_id: target.providerModelId }),
           target.providerModelId,
         ) ?? undefined;
     } catch (error) {
@@ -1046,27 +1125,45 @@ export async function inspectHiggsfieldProvider(input: {
       candidate: canonicalCandidate,
       detail: canonicalDetail,
       generateTool,
+      canonicalMediaRole: currentModels,
     });
 
     if (!profile.available) {
       // Search and list remain bounded diagnostics only and never select an execution model.
       try {
-        const strictSearch = await input.callTool("models_explore", {
-          action: "search",
-          query: target.searchName,
-          type: "image",
-          input: "image",
-          limit: 20,
-        });
+        const strictSearch = legacyModels
+          ? await input.callTool("models_explore", {
+              action: "search",
+              query: target.searchName,
+              type: "image",
+              input: "image",
+              limit: 20,
+            })
+          : hasValidTool("models_search")
+            ? await input.callTool("models_search", {
+                query: target.searchName,
+                type: "image",
+                input: "image",
+                limit: 20,
+              })
+            : await input.callTool("models_list", { type: "image", input: "image", limit: 100 });
         let candidates = modelItems(strictSearch);
         let exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
         if (exact.length === 0) {
-          const relaxedSearch = await input.callTool("models_explore", {
-            action: "search",
-            query: target.searchName,
-            type: "image",
-            limit: 20,
-          });
+          const relaxedSearch = legacyModels
+            ? await input.callTool("models_explore", {
+                action: "search",
+                query: target.searchName,
+                type: "image",
+                limit: 20,
+              })
+            : hasValidTool("models_search")
+              ? await input.callTool("models_search", {
+                  query: target.searchName,
+                  type: "image",
+                  limit: 20,
+                })
+              : await input.callTool("models_list", { type: "image", limit: 100 });
           candidates = modelItems(relaxedSearch);
           exact = candidates.filter((candidate) => searchModelMatches(target, candidate));
         }
@@ -1183,7 +1280,7 @@ export function getHiggsfieldCapabilitySummary(sessionFingerprint: string, now =
     tools: record.tools
       .map((tool) => tool.name)
       .filter((name): name is HiggsfieldMcpToolName =>
-        (REQUIRED_TOOLS as readonly string[]).includes(name),
+        (SUPPORTED_TOOLS as readonly string[]).includes(name),
       ),
     models: record.models.map((model) => ({
       key: model.key,
@@ -1223,7 +1320,7 @@ export async function callHiggsfieldMcpTool(input: {
   fetchImpl?: typeof fetch;
   preserveToolResult?: boolean;
 }): Promise<Record<string, unknown>> {
-  if (!(REQUIRED_TOOLS as readonly string[]).includes(input.name)) {
+  if (!(SUPPORTED_TOOLS as readonly string[]).includes(input.name)) {
     throw new HiggsfieldMcpError("capability_required");
   }
   return withOfficialMcpClient({

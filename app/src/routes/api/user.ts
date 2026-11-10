@@ -11,7 +11,13 @@ export const Route = createFileRoute("/api/user")({
         }
         const headers = new Headers({ "Cache-Control": "no-store" });
         if (active.rotatedCookies) appendOAuthSessionCookies(headers, active.rotatedCookies);
-        return Response.json({ id: "higgsfield-oauth", workspaceId: "personal" }, { headers });
+        return Response.json({
+          id: "higgsfield-oauth",
+          workspaceId: "personal",
+          ...(typeof active.session.accountEmail === "string"
+            ? { accountEmail: active.session.accountEmail }
+            : {}),
+        }, { headers });
       },
     },
   },

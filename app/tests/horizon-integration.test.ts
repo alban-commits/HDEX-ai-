@@ -9,7 +9,7 @@ import { createJobClient, type Generation, type ListResult } from "@higgsfield/f
 import { nanoBanana2 } from "@higgsfield/fnf/jobs";
 import { flattenFeedPages, fnfKeys, jobsFeedQueryOptions } from "@higgsfield/fnf-react";
 import { HORIZON_PROMPT_MAX_DECLARED_BYTES, HORIZON_PROMPT_MAX_TOTAL_BYTES, handleHorizonPrompt } from "../src/server/horizon-prompt-route.server";
-import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
+import { HORIZON_MAX_FOLDER_DEPTH, HORIZON_MAX_FOLDER_FILES, HORIZON_SLOTS, HorizonBatchStepError, claimHorizonImageReservation, horizonBatchFailureMessage, horizonBatchProgress, horizonBatchStageFailureMessage, horizonBatchStepFailureMessage, horizonConnectionState, horizonGenerationMatchesEngine, renumberHorizonImages, resolveHorizonBatchOutcome, runHorizonBatchSequence, scanHorizonFolder, selectHorizonImages, settleHorizonBatchStatus } from "../src/lib/horizon";
 import { ensureHorizonCompletedDirectory, HORIZON_COMPLETED_DIRECTORY_NAME, HorizonDirectoryScanError, horizonDirectoryPickerFor, pickHorizonBatchDirectory, requestHorizonBatchDirectoryPermission, restoreHorizonBatchDirectory, saveHorizonBatchNative, saveHorizonBatchPngPsd, saveHorizonBatchResults, scanHorizonDirectory, type HorizonDirectoryHandle, type HorizonFileHandle } from "../src/lib/horizon-filesystem.browser";
 import { HORIZON_HISTORY_QUERY, syncHorizonHistory } from "../src/lib/horizon-history";
 import { HORIZON_UPLOAD_MAX_EDGE, HORIZON_UPLOAD_TARGET_BYTES, HORIZON_UPLOAD_TARGET_PIXELS, horizonOptimizedDimensions, optimizeHorizonUploadFile, runHorizonGenerationFlow, uploadHorizonAssets, withHorizonUploadedAssets } from "../src/lib/horizon.browser";
@@ -263,6 +263,8 @@ describe("Horizon selection and folder contracts", () => {
       message: "GPT 이미지 분석 시간이 초과됐습니다. 같은 작업을 다시 시도해 주세요.",
     }]);
     expect(horizonBatchStageFailureMessage("uploading")).toBe("참조 이미지 업로드에 실패했습니다.");
+    expect(horizonBatchStepFailureMessage("uploading", new Error("Higgsfield 이미지 전송에 실패했습니다."))).toBe("Higgsfield 이미지 전송에 실패했습니다.");
+    expect(horizonBatchStepFailureMessage("uploading", { message: "internal" })).toBe("참조 이미지 업로드에 실패했습니다.");
     expect(horizonBatchStageFailureMessage("generating")).toBe("이미지 생성 요청 또는 결과 처리에 실패했습니다.");
     expect(jobs.map((job) => settleHorizonBatchStatus(job.status, job.ready))).toEqual(["failed", "failed", "queued"]);
   });
@@ -662,10 +664,10 @@ describe("Horizon browser directory boundary", () => {
 
 describe("Horizon browser mutation boundaries", () => {
   test("automatically bounds oversized Horizon references before upload", async () => {
-    expect(HORIZON_UPLOAD_TARGET_BYTES).toBe(18 * 1024 * 1024);
-    expect(HORIZON_UPLOAD_TARGET_PIXELS).toBe(30_000_000);
-    expect(HORIZON_UPLOAD_MAX_EDGE).toBe(6_000);
-    expect(horizonOptimizedDimensions(8_160, 6_120)).toEqual({ width: 6_000, height: 4_500 });
+    expect(HORIZON_UPLOAD_TARGET_BYTES).toBe(8 * 1024 * 1024);
+    expect(HORIZON_UPLOAD_TARGET_PIXELS).toBe(16_000_000);
+    expect(HORIZON_UPLOAD_MAX_EDGE).toBe(4_096);
+    expect(horizonOptimizedDimensions(8_160, 6_120)).toEqual({ width: 4_096, height: 3_072 });
 
     let closed = false;
     const encodedDimensions: Array<{ width: number; height: number; quality: number }> = [];
@@ -689,7 +691,7 @@ describe("Horizon browser mutation boundaries", () => {
     expect(optimized.type).toBe("image/jpeg");
     expect(optimized.lastModified).toBe(123);
     expect(optimized.size).toBe(1_024);
-    expect(encodedDimensions).toEqual([{ width: 6_000, height: 4_500, quality: 0.92 }]);
+    expect(encodedDimensions).toEqual([{ width: 4_096, height: 3_072, quality: 0.92 }]);
     expect(closed).toBe(true);
 
     let uploadedFile: File | null = null;
@@ -941,7 +943,7 @@ describe("Horizon prompt contract", () => {
     expect(HORIZON_PROMPT_MAX_TOTAL_BYTES).toBe(80 * 1024 * 1024);
   });
 
-  test("returns a safe 502 for an OpenAI provider failure", async () => {
+  test("returns a Cloudflare-safe dependency failure for an OpenAI provider failure", async () => {
     const image = new Uint8Array(await sharp({ create: { width: 2, height: 2, channels: 3, background: "#fff" } }).png().toBuffer());
     const form = new FormData();
     form.append("image", new File([image], "model.png", { type: "image/png" }));
@@ -950,7 +952,7 @@ describe("Horizon prompt contract", () => {
       requireSession: async () => ({ config: { publicOrigin: "https://hdex-ai.company.example" }, session: {}, rotatedCookies: null } as never),
       composePrompt: async () => { throw new Error("private_provider_detail"); },
     });
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(424);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ ok: false, code: "provider_error", message: "GPT 명령어 작성 요청에 실패했습니다." });
   });
@@ -1022,7 +1024,7 @@ const aspects = ["2:3","3:2","3:4","4:3","9:16","16:9","1:1"];
 function model(id:string) {
   if(id==="nano_banana_pro") return {id,name:"Google Nano Banana Pro",provider_name:"Google",output_type:"image",aspect_ratios:aspects,parameters:[{name:"aspect_ratio",options:aspects},{name:"resolution",options:["2k","4k"]}],medias:[{roles:["reference"],max:14}]};
   if(id==="soul_v2") return {id,name:"Higgsfield Soul V2",provider_name:"Higgsfield",output_type:"image",aspect_ratios:aspects.filter((v)=>v!=="3:2"),parameters:[{name:"aspect_ratio",options:aspects.filter((v)=>v!=="3:2")},{name:"quality",options:["1.5k","2k"]}],medias:[{roles:["reference"],max:1}]};
-  return {id,name:"GPT Image 2",provider_name:"OpenAI",output_type:"image",aspect_ratios:aspects,parameters:[{name:"aspect_ratio",options:aspects},{name:"resolution",options:["2k"]},{name:"quality",options:["high"]}],medias:[{roles:["reference"],max:14}]};
+  return {id,name:"GPT Image 2.6",provider_name:"OpenAI",output_type:"image",aspect_ratios:aspects,parameters:[{name:"aspect_ratio",options:aspects},{name:"resolution",options:["2k"]},{name:"quality",options:["high"]}],medias:[{roles:["reference"],max:14}]};
 }
 const session:HiggsfieldOAuthSession={schemaVersion:"hdex.higgsfield-oauth-session.v1",accessToken:"same-provider-account",refreshToken:"same-refresh",clientId:"browser-a",tokenEndpoint:"https://auth.higgsfield.ai/token",resource:"https://mcp.higgsfield.ai/mcp",accessExpiresAt:NOW+3600000,sessionExpiresAt:NOW+86400000};
 
@@ -1065,7 +1067,7 @@ describe("Nano Banana Pro MCP boundary", () => {
       { jobSetType: "nano_banana_2" as const, responseModel: "nano_banana_pro", lineage: "provider_model", accepted: true, marker: "p" },
       { jobSetType: "nano_banana_2" as const, responseModel: "nano_banana_2", lineage: "public_job_type", accepted: true, marker: "j" },
       { jobSetType: "nano_banana_2" as const, responseModel: "nano_banana_v2", lineage: "conflict", accepted: false, marker: "x" },
-      { jobSetType: "gpt_image_2" as const, responseModel: "gpt_image_2", lineage: "provider_model", accepted: true, marker: "g" },
+      { jobSetType: "gpt_image_2" as const, responseModel: "gpt_image_2_6", lineage: "provider_model", accepted: true, marker: "g" },
     ];
     for (const [index, scenario] of scenarios.entries()) {
       const activeSession = { ...session, browserSessionId: scenario.marker.repeat(43) };
@@ -1150,7 +1152,7 @@ describe("Nano Banana Pro MCP boundary", () => {
   test("allows 14 GPT/Nano references and blocks 15 before generate_image", async () => {
     const record=await inspectHiggsfieldProvider({includeNano:true,now:NOW,listTools:async()=>({tools:toolList}),callTool:async(_name,args)=>({structuredContent:model(String(args.model_id))})});
     for (const target of [
-      { jobSetType: "gpt_image_2" as const, providerModel: "gpt_image_2", extra: { quality: "high" }, field: "medias" },
+      { jobSetType: "gpt_image_2" as const, providerModel: "gpt_image_2_6", extra: { quality: "high" }, field: "medias" },
       { jobSetType: "nano_banana_2" as const, providerModel: "nano_banana_pro", extra: {}, field: "input_images" },
     ]) {
       const activeSession = { ...session, browserSessionId: (target.jobSetType === "gpt_image_2" ? "g" : "b").repeat(43) };
@@ -1388,23 +1390,32 @@ describe("Horizon WebP upload boundary", () => {
     await clearGenerationRuntime(fingerprint, env);
   });
 
-  test("rejects invalid WebP conversion and blocks upload when no approved model is ready", async () => {
+  test("rejects invalid WebP conversion while keeping media upload independent from model discovery", async () => {
     await expect(normalizeHiggsfieldUploadImage({ bytes: new Uint8Array([1, 2, 3]), contentType: "image/webp", maxOriginalBytes: 20 * 1024 * 1024 })).rejects.toThrow();
     const activeSession = { ...session, browserSessionId: "z".repeat(43) };
     const fingerprint = higgsfieldOAuthSessionFingerprint(activeSession);
     const discovered=await inspectHiggsfieldProvider({includeNano:true,now:NOW,listTools:async()=>({tools:toolList}),callTool:async(_name,args)=>({structuredContent:model(String(args.model_id))})});
     const noneReady = { ...discovered, models: discovered.models.map((profile) => ({ ...profile, available: false as const, reason: "profile_invalid" as const })) };
     await inspectHiggsfieldCapabilities({sessionFingerprint:fingerprint,mcpUrl:activeSession.resource,accessToken:activeSession.accessToken,now:NOW,runner:async()=>noneReady});
-    let calls = 0;
-    await expect(uploadHiggsfieldImage({
+    const calls: string[] = [];
+    const ref = await uploadHiggsfieldImage({
       session: activeSession,
       fingerprint,
       filename: "normalized-image.png",
       contentType: "image/png",
       bytes: new Uint8Array([137, 80, 78, 71]),
-      callTool: async () => { calls += 1; return {}; },
-    })).rejects.toMatchObject({ reason: "capability_required" });
-    expect(calls).toBe(0);
+      callTool: async (name) => {
+        calls.push(name);
+        return name === "media_upload"
+          ? { uploads: [{ media_id: "independent-media", upload_url: "https://uploads.higgsfield.ai/put", content_type: "image/png", method: "PUT" }] }
+          : { results: [{ media_id: "independent-media", status: "confirmed" }] };
+      },
+      uploadFetch: async () => new Response(null, { status: 200 }),
+      env,
+      now: NOW,
+    });
+    expect(ref).toEqual({ id: "independent-media", type: "image" });
+    expect(calls).toEqual(["media_upload", "media_confirm"]);
     clearHiggsfieldRuntime(fingerprint);
   });
 });

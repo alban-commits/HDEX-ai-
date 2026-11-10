@@ -1,10 +1,10 @@
 import { ApiJobError } from "@higgsfield/fnf/errors";
-import { callHiggsfieldMcpTool, requireDiscoveredModel } from "./higgsfield-mcp.server";
+import { callHiggsfieldMcpTool } from "./higgsfield-mcp.server";
 import type { HiggsfieldOAuthSession } from "./higgsfield-oauth.server";
 import { requestPinnedHttps } from "./pinned-https.server";
 import { registerGenerationMedia } from "./generation-attempt-store.server";
 
-const UPLOAD_TIMEOUT_MS = 30_000;
+const UPLOAD_TIMEOUT_MS = 120_000;
 const MAX_UPLOAD_RESPONSE_BYTES = 64 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -25,6 +25,34 @@ function safeSignedUploadUrl(value: unknown): string | null {
   }
 }
 
+function safeUploadContentType(value: unknown): "image/jpeg" | "image/png" | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "image/jpeg" || normalized === "image/jpg") return "image/jpeg";
+  return normalized === "image/png" ? "image/png" : null;
+}
+
+function signedUploadHeaders(
+  uploadUrl: string,
+  contentType: "image/jpeg" | "image/png",
+): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": contentType };
+  const url = new URL(uploadUrl);
+  const signedHeadersEntry = [...url.searchParams.entries()].find(
+    ([key]) => key.toLowerCase() === "x-amz-signedheaders",
+  );
+  const signedHeaders = new Set(
+    (signedHeadersEntry?.[1] ?? "")
+      .split(";")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  // Higgsfield's current MCP upload reservation signs this conditional header.
+  // Omitting it makes the storage PUT fail even though media_upload succeeded.
+  if (signedHeaders.has("if-none-match")) headers["If-None-Match"] = "*";
+  return headers;
+}
+
 export async function uploadHiggsfieldImage(input: {
   session: HiggsfieldOAuthSession;
   fingerprint: string;
@@ -39,12 +67,6 @@ export async function uploadHiggsfieldImage(input: {
   env?: NodeJS.ProcessEnv;
   now?: number;
 }): Promise<{ id: string; type: "image" }> {
-  // 업로드 전에 현재 앱이 승인한 이미지 모델 중 하나라도 실행 가능해야 한다.
-  let ready = false;
-  for (const key of ["gpt_image_2", "soul_2", "nano_banana_pro"] as const) {
-    try { requireDiscoveredModel(input.fingerprint, key); ready = true; break; } catch {}
-  }
-  if (!ready) requireDiscoveredModel(input.fingerprint, "gpt_image_2");
   const callTool =
     input.callTool ??
     ((name, args) => callHiggsfieldMcpTool({ session: input.session, name, args }));
@@ -65,25 +87,27 @@ export async function uploadHiggsfieldImage(input: {
   }
   const mediaId = safeId(upload.media_id);
   const uploadUrl = safeSignedUploadUrl(upload.upload_url);
+  const uploadContentType = safeUploadContentType(upload.content_type) ?? input.contentType;
   if (
     !mediaId ||
     !uploadUrl ||
-    upload.content_type !== input.contentType ||
     String(upload.method).toUpperCase() !== "PUT"
   ) {
     throw new ApiJobError("invalid_response", "Higgsfield 업로드 계보를 확인할 수 없습니다.", {
       status: 502,
     });
   }
+  const uploadHeaders = signedUploadHeaders(uploadUrl, uploadContentType);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+  let uploadFailure: unknown;
   try {
     if (input.uploadFetch) {
       const response = await input.uploadFetch(uploadUrl, {
         method: "PUT",
-        headers: { "Content-Type": input.contentType },
-        body: new Blob([input.bytes as BlobPart], { type: input.contentType }),
+        headers: uploadHeaders,
+        body: new Blob([input.bytes as BlobPart], { type: uploadContentType }),
         redirect: "error",
         signal: controller.signal,
       });
@@ -98,7 +122,7 @@ export async function uploadHiggsfieldImage(input: {
       const response = await requestPinnedHttps({
         url: uploadUrl,
         method: "PUT",
-        headers: { "Content-Type": input.contentType },
+        headers: uploadHeaders,
         body: input.bytes,
         maxResponseBytes: MAX_UPLOAD_RESPONSE_BYTES,
         signal: controller.signal,
@@ -110,22 +134,32 @@ export async function uploadHiggsfieldImage(input: {
       }
     }
   } catch (error) {
-    if (error instanceof ApiJobError) throw error;
-    throw new ApiJobError(
-      controller.signal.aborted ? "timeout" : "media_upload_failed",
-      controller.signal.aborted
-        ? "Higgsfield 이미지 전송 시간이 초과됐습니다."
-        : "Higgsfield 이미지 전송에 실패했습니다.",
-      { status: 502 },
-    );
+    // The provider can finish the PUT even if its response is lost. Confirm
+    // the reserved media below before declaring the Horizon upload failed.
+    uploadFailure = error;
   } finally {
     clearTimeout(timer);
   }
 
-  const confirmed = await callTool("media_confirm", {
-    media_ids: [mediaId],
-    type: "image",
-  });
+  let confirmed: Record<string, unknown>;
+  try {
+    confirmed = await callTool("media_confirm", {
+      media_ids: [mediaId],
+      type: "image",
+    });
+  } catch (confirmError) {
+    if (uploadFailure instanceof ApiJobError) throw uploadFailure;
+    if (uploadFailure) {
+      throw new ApiJobError(
+        controller.signal.aborted ? "timeout" : "media_upload_failed",
+        controller.signal.aborted
+          ? "Higgsfield 이미지 전송 시간이 초과됐습니다."
+          : "Higgsfield 이미지 전송에 실패했습니다.",
+        { status: 502 },
+      );
+    }
+    throw confirmError;
+  }
   if (!Array.isArray(confirmed.results) || confirmed.results.length !== 1) {
     throw new ApiJobError("invalid_response", "Higgsfield 이미지 확정 응답이 올바르지 않습니다.", {
       status: 502,
@@ -139,6 +173,16 @@ export async function uploadHiggsfieldImage(input: {
     typeof result.status !== "string" ||
     !acceptedStatuses.has(result.status.trim().toLowerCase())
   ) {
+    if (uploadFailure instanceof ApiJobError) throw uploadFailure;
+    if (uploadFailure) {
+      throw new ApiJobError(
+        controller.signal.aborted ? "timeout" : "media_upload_failed",
+        controller.signal.aborted
+          ? "Higgsfield 이미지 전송 시간이 초과됐습니다."
+          : "Higgsfield 이미지 전송에 실패했습니다.",
+        { status: 502 },
+      );
+    }
     throw new ApiJobError("invalid_response", "Higgsfield 이미지 확정 계보가 일치하지 않습니다.", {
       status: 502,
     });

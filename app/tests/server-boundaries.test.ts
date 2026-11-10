@@ -39,6 +39,7 @@ describe("server OpenAI image input boundary", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-hdex-api-response")).toBe("1");
+    expect(response.headers.get("set-cookie")).toBeNull();
     expect(await response.json()).toMatchObject({ code: "oauth_required" });
   });
 
@@ -50,6 +51,7 @@ describe("server OpenAI image input boundary", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-hdex-api-response")).toBe("1");
+    expect(response.headers.get("set-cookie")).toBeNull();
     expect(await response.json()).toMatchObject({
       ok: false,
       error: { code: "oauth_required" },
