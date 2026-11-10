@@ -234,11 +234,21 @@ describe("Higgsfield adapter JSON boundary", () => {
         error: {
           code: "outcome_unknown",
           status: 502,
-          data: { failureStage: "provider" },
+          data: {
+            failureStage: "provider",
+            generationStage: "generate_image",
+            providerErrorPresent: false,
+            toolErrorPresent: true,
+            resultCount: 0,
+            jobIdPresent: false,
+            requestDurationMs: 24_500,
+            responseShape: "plain_text_error",
+            rejectionClass: "validation",
+            parseFailure: "none",
+            modelLineage: "conflict",
+          },
         },
       });
-      expect(JSON.stringify(body)).not.toContain("generationStage");
-      expect(JSON.stringify(body)).not.toContain("requestDurationMs");
       expect(diagnostics).toHaveLength(1);
       expect(JSON.parse(diagnostics[0]!)).toEqual({
         event: "higgsfield_adapter_response",

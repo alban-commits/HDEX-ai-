@@ -1395,8 +1395,8 @@ describe("Higgsfield MCP discovery boundary", () => {
       {
         name: "validation",
         text: "Invalid required parameter prompt=private prompt file://private/path",
-        expectedCode: "provider_failure",
-        expectedStatus: 502,
+        expectedCode: "provider_validation",
+        expectedStatus: 422,
         rejectionClass: "validation",
       },
     ] as const) {
@@ -1449,6 +1449,75 @@ describe("Higgsfield MCP discovery boundary", () => {
       expect(serialized).not.toContain("private.example");
       expect(serialized).not.toContain("private prompt");
       expect(serialized).not.toContain("private/path");
+      await clearGenerationRuntime(fingerprint, GENERATION_ENV);
+      clearHiggsfieldRuntime(fingerprint);
+    }
+  });
+
+  test("classifies structured and JSON tool errors without exposing provider details", async () => {
+    for (const scenario of [
+      {
+        name: "structured-permission",
+        response: {
+          isError: true,
+          structuredContent: {
+            error: { message: "Access denied for private-account-id" },
+          },
+        },
+        expectedCode: "provider_permission",
+        expectedStatus: 403,
+        responseShape: "structured",
+        rejectionClass: "permission",
+      },
+      {
+        name: "json-moderation",
+        response: {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ detail: "Content policy blocked private-prompt" }),
+            },
+          ],
+        },
+        expectedCode: "provider_moderation",
+        expectedStatus: 422,
+        responseShape: "json_text",
+        rejectionClass: "moderation",
+      },
+    ] as const) {
+      const fingerprint = `generation-${scenario.name}-session`;
+      await seed(fingerprint);
+      const diagnostics: unknown[] = [];
+      const error = await capturedError(() =>
+        createHiggsfieldGeneration({
+          fingerprint,
+          session,
+          jobSetType: "text2image_soul_v2",
+          params: {
+            prompt: "one person in a studio",
+            batch_size: 1,
+            aspect_ratio: "1:1",
+            quality: "1080p",
+            medias: [],
+          },
+          confirmationToken: `request-${scenario.name}-0001`,
+          env: GENERATION_ENV,
+          callTool: async () => scenario.response,
+          onGenerationDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+          now: NOW,
+        }),
+      );
+      expect(error).toMatchObject({ code: scenario.expectedCode, status: scenario.expectedStatus });
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          responseShape: scenario.responseShape,
+          rejectionClass: scenario.rejectionClass,
+          toolErrorPresent: true,
+        }),
+      ]);
+      expect(JSON.stringify({ error, diagnostics })).not.toContain("private-account-id");
+      expect(JSON.stringify({ error, diagnostics })).not.toContain("private-prompt");
       await clearGenerationRuntime(fingerprint, GENERATION_ENV);
       clearHiggsfieldRuntime(fingerprint);
     }

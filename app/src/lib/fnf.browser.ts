@@ -119,11 +119,22 @@ function throwAdapterError(error: {
   const failureStage = isRecord(error.data) && typeof error.data.failureStage === "string"
     ? error.data.failureStage
     : null;
+  const rejectionClass = isRecord(error.data) && typeof error.data.rejectionClass === "string"
+    ? error.data.rejectionClass
+    : null;
+  const responseShape = isRecord(error.data) && typeof error.data.responseShape === "string"
+    ? error.data.responseShape
+    : null;
+  const diagnosticSuffix = [
+    failureStage ? `단계: ${failureStage}` : null,
+    rejectionClass ? `분류: ${rejectionClass}` : null,
+    responseShape ? `응답: ${responseShape}` : null,
+  ].filter(Boolean).join(", ");
   throw errorFromJSON({
     ...error,
     message:
-      failureStage && error.status
-        ? `${error.message} (HTTP ${error.status}, 단계: ${failureStage})`
+      diagnosticSuffix && error.status
+        ? `${error.message} (HTTP ${error.status}, ${diagnosticSuffix})`
         : error.message,
   });
 }

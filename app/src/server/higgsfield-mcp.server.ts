@@ -556,7 +556,10 @@ export function parseHiggsfieldMcpContent(
       content: value.structuredContent as Record<string, unknown>,
       isError: value.isError === true,
       responseShape: "structured",
-      rejectionClass: "unknown",
+      rejectionClass:
+        value.isError === true
+          ? classifyHiggsfieldProviderRejection(JSON.stringify(value.structuredContent))
+          : "unknown",
     };
   }
   if (value.structuredContent !== undefined && value.structuredContent !== null) {
@@ -631,7 +634,10 @@ export function parseHiggsfieldMcpContent(
     content: candidates[0]!,
     isError: value.isError === true,
     responseShape: "json_text",
-    rejectionClass: "unknown",
+    rejectionClass:
+      value.isError === true
+        ? classifyHiggsfieldProviderRejection(JSON.stringify(candidates[0]))
+        : "unknown",
   };
 }
 

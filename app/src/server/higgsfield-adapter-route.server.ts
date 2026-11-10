@@ -296,6 +296,9 @@ export async function handleHiggsfieldAdapter(
       data: {
         ...(isRecord(sourcePayload.data) ? sourcePayload.data : {}),
         failureStage,
+        ...(failureStage === "provider" && generationDiagnostic
+          ? generationDiagnostic
+          : {}),
       },
     };
     const status = payload.status ?? 500;

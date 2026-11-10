@@ -104,31 +104,42 @@ function providerError(content: Record<string, unknown>): string | null {
 }
 
 function explicitProviderFailure(error: string): ApiJobError {
-  return classifyHiggsfieldProviderRejection(error) === "credits"
-    ? new ApiJobError(
-        "insufficient_credits",
-        "Higgsfield 개인 계정 크레딧을 확인해 주세요.",
-        { status: 402 },
-      )
-    : new ApiJobError(
-        "provider_failure",
-        "Higgsfield 이미지 생성 요청이 거부되었습니다.",
-        { status: 502 },
-      );
+  return toolProviderFailure(classifyHiggsfieldProviderRejection(error));
 }
 
 function toolProviderFailure(rejectionClass: HiggsfieldMcpRejectionClass): ApiJobError {
-  return rejectionClass === "credits"
-    ? new ApiJobError(
+  switch (rejectionClass) {
+    case "credits":
+      return new ApiJobError(
         "insufficient_credits",
         "Higgsfield 개인 계정 크레딧을 확인해 주세요.",
         { status: 402 },
-      )
-    : new ApiJobError(
+      );
+    case "validation":
+      return new ApiJobError(
+        "provider_validation",
+        "Higgsfield가 현재 이미지 생성 요청 형식을 거부했습니다.",
+        { status: 422 },
+      );
+    case "permission":
+      return new ApiJobError(
+        "provider_permission",
+        "연결한 Higgsfield 계정에 현재 모델 사용 권한이 없습니다.",
+        { status: 403 },
+      );
+    case "moderation":
+      return new ApiJobError(
+        "provider_moderation",
+        "Higgsfield 안전 정책에 의해 이미지 생성 요청이 거부되었습니다.",
+        { status: 422 },
+      );
+    default:
+      return new ApiJobError(
         "provider_failure",
         "Higgsfield 이미지 생성 요청이 거부되었습니다.",
         { status: 502 },
       );
+  }
 }
 
 function normalizeGenerateError(error: unknown): unknown {
