@@ -92,6 +92,50 @@ test("verifies the live Higgsfield MCP tools and models before generation", asyn
   }
 });
 
+test("allows a selected ready model when another MCP image model is unavailable", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    appJson({
+      ok: true,
+      capability: {
+        status: "partial",
+        models: [
+          { key: "soul_2", name: "Soul 2", ready: true },
+          { key: "nano_banana_pro", name: "Nano Banana Pro", ready: false },
+        ],
+      },
+    });
+  try {
+    await expect(inspectHiggsfieldOAuthCapabilities(["soul_2"])).resolves.toMatchObject({
+      status: "partial",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("blocks generation when the selected MCP image model is unavailable", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    appJson({
+      ok: true,
+      capability: {
+        status: "partial",
+        models: [
+          { key: "soul_2", name: "Soul 2", ready: true },
+          { key: "nano_banana_pro", name: "Nano Banana Pro", ready: false },
+        ],
+      },
+    });
+  try {
+    await expect(
+      inspectHiggsfieldOAuthCapabilities(["nano_banana_pro"]),
+    ).rejects.toMatchObject({ code: "higgsfield_models_unavailable" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("requests account reconnection when MCP capability verification rejects OAuth", async () => {
   const originalFetch = globalThis.fetch;
   let notifications = 0;

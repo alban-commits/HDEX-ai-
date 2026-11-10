@@ -158,7 +158,9 @@ export async function disconnectHiggsfieldOAuth(): Promise<void> {
 }
 
 /** Verify the OAuth session against the live Higgsfield MCP tools and model catalog. */
-export async function inspectHiggsfieldOAuthCapabilities(): Promise<HiggsfieldCapabilitySummary> {
+export async function inspectHiggsfieldOAuthCapabilities(
+  requiredModelKeys: readonly string[] = [],
+): Promise<HiggsfieldCapabilitySummary> {
   const result = await fetchAppJson<HiggsfieldCapabilityResponse>({
     path: "/api/higgsfield/oauth/capabilities",
     init: { method: "POST", credentials: "include" },
@@ -178,16 +180,28 @@ export async function inspectHiggsfieldOAuthCapabilities(): Promise<HiggsfieldCa
       data: { reconnectRequired: result.reconnectRequired === true },
     });
   }
-  if (result.capability.status !== "ready") {
-    const unavailable = result.capability.models
-      .filter((model) => !model.ready)
+  const required = new Set(requiredModelKeys);
+  const unavailableModels = result.capability.models.filter(
+    (model) => !model.ready && (required.size === 0 || required.has(model.key)),
+  );
+  const missingRequired = [...required].filter(
+    (key) => !result.capability.models.some((model) => model.key === key && model.ready),
+  );
+  if (
+    (required.size === 0 && result.capability.status !== "ready") ||
+    unavailableModels.length > 0 ||
+    missingRequired.length > 0
+  ) {
+    const unavailable = unavailableModels
       .map((model) => model.name)
       .join(", ");
     throw errorFromJSON({
       code: "higgsfield_models_unavailable",
       message: unavailable
         ? `현재 사용할 수 없는 Higgsfield 모델이 있습니다: ${unavailable}`
-        : "Higgsfield 모델 연결이 준비되지 않았습니다.",
+        : missingRequired.length
+          ? "선택한 Higgsfield 모델 연결이 준비되지 않았습니다. 계정을 다시 연결해 주세요."
+          : "Higgsfield 모델 연결이 준비되지 않았습니다.",
     });
   }
   return result.capability;

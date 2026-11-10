@@ -1,8 +1,13 @@
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 
 function normalizeLineEndings(value: string): string {
   return value.replace(/\r\n?/g, "\n");
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 describe("existing product UI regression boundary", () => {
@@ -47,7 +52,7 @@ describe("existing product UI regression boundary", () => {
     expect(component.slice(failureBoundary, handlerEnd)).not.toContain("releaseAllLocalUploads");
     expect(component.slice(failureBoundary, handlerEnd)).not.toContain("setPose(null)");
     expect(component.slice(failureBoundary, handlerEnd)).not.toContain("removeGenerationQueries");
-    expect(component).toContain("setUploads([]);");
+    expect(component).toContain('inspectHiggsfieldOAuthCapabilities(["soul_2"])');
     expect(component).toContain("setProfile(null);");
     expect(component).toContain("현재 작업은 그대로 유지됩니다.");
     expect(component).not.toContain("disconnectHorizonOAuth");

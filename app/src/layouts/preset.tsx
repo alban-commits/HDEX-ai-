@@ -35,6 +35,7 @@ import {
   clearStaleHiggsfieldOAuthError,
   getHiggsfieldOAuthCallbackMessage,
   getSignInUrl,
+  inspectHiggsfieldOAuthCapabilities,
   PRESET_JOBS,
   releaseAllLocalUploads,
   releaseLocalUpload,
@@ -179,6 +180,8 @@ export function PresetTemplate() {
   );
   const [activeTab, setActiveTab] = useState("json");
   const [pendingSignInUrl, setPendingSignInUrl] = useState<string | null>(null);
+  const [mcpReady, setMcpReady] = useState(false);
+  const [mcpChecking, setMcpChecking] = useState(false);
 
   useEffect(
     () =>
@@ -196,6 +199,35 @@ export function PresetTemplate() {
     if (resolvedScopeKey !== undefined && scopeKey !== GUEST_SCOPE_KEY) {
       clearStaleHiggsfieldOAuthError();
     }
+  }, [resolvedScopeKey, scopeKey]);
+  useEffect(() => {
+    if (resolvedScopeKey === undefined || scopeKey === GUEST_SCOPE_KEY) {
+      return;
+    }
+    let active = true;
+    void Promise.resolve()
+      .then(() => {
+        if (active) setMcpChecking(true);
+        return inspectHiggsfieldOAuthCapabilities(["soul_2"]);
+      })
+      .then(() => {
+        if (active) setMcpReady(true);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setMcpReady(false);
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Higgsfield Soul 2 연결을 확인하지 못했습니다. 계정을 다시 연결해 주세요.",
+        );
+      })
+      .finally(() => {
+        if (active) setMcpChecking(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [resolvedScopeKey, scopeKey]);
 
   const history = useInfiniteQuery({
@@ -344,13 +376,28 @@ export function PresetTemplate() {
     setProfileBusy(false);
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!canGenerate || run.isRunning || !requireSignIn()) return;
     setMessage("");
-    void savePreferences({
+    setMcpChecking(true);
+    try {
+      await inspectHiggsfieldOAuthCapabilities(["soul_2"]);
+      setMcpReady(true);
+    } catch (error) {
+      setMcpReady(false);
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Higgsfield Soul 2 연결을 확인하지 못했습니다. 계정을 다시 연결해 주세요.",
+      );
+      return;
+    } finally {
+      setMcpChecking(false);
+    }
+    await savePreferences({
       data: { mode, gender, environment, scene, aspectRatio, imageType },
     });
-    void run.start(input);
+    await run.start(input);
   };
 
   const downloadProfile = () => {
@@ -567,8 +614,8 @@ export function PresetTemplate() {
               variant="marketingPrimary"
               size="md"
               className="w-full"
-              disabled={!canGenerate || run.isRunning}
-              onClick={handleGenerate}
+              disabled={!canGenerate || run.isRunning || mcpChecking || !mcpReady}
+              onClick={() => void handleGenerate()}
               end={
                 run.isRunning ? (
                   <Loader size="xs" color="neutral" />
@@ -580,7 +627,7 @@ export function PresetTemplate() {
                 )
               }
             >
-              {run.isRunning ? "생성 요청 중" : "Higgsfield로 생성"}
+              {run.isRunning ? "생성 요청 중" : mcpChecking ? "Higgsfield 연결 확인 중" : "Higgsfield로 생성"}
             </Button>
             <div className="flex min-h-6 items-center justify-center gap-1">
               {resolvedScopeKey === undefined ? (
