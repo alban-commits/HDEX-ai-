@@ -7,7 +7,10 @@ import type { HiggsfieldOAuthSession } from "./higgsfield-oauth.server";
 
 export const HIGGSFIELD_MCP_TIMEOUT_MS = 25_000;
 export const HIGGSFIELD_MCP_CLOSE_TIMEOUT_MS = 1_000;
-export const HIGGSFIELD_MCP_MAX_RESPONSE_BYTES = 1024 * 1024;
+// The current official Higgsfield catalog exposes more than 180 tools and its
+// first tools/list response is slightly larger than 1 MiB. Keep a bounded
+// ceiling while leaving enough room for that authenticated catalog.
+export const HIGGSFIELD_MCP_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 export const HIGGSFIELD_MCP_MAX_PAGES = 8;
 export const HIGGSFIELD_MCP_MAX_TOOLS = 256;
 export const HIGGSFIELD_MODEL_MAX_PAGES = 3;

@@ -300,6 +300,10 @@ async function capturedError(operation: () => Promise<unknown>): Promise<unknown
 }
 
 describe("Higgsfield MCP discovery boundary", () => {
+  test("allows the expanded official tool catalog while retaining a bounded response ceiling", () => {
+    expect(HIGGSFIELD_MCP_MAX_RESPONSE_BYTES).toBe(4 * 1024 * 1024);
+  });
+
   test("bounds a provider MCP close that never settles", async () => {
     let closeCalls = 0;
     await closeHiggsfieldMcpClient(
