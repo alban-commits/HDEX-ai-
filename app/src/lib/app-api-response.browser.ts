@@ -1,5 +1,9 @@
 import { errorFromJSON } from "@higgsfield/fnf/errors";
-import { HDEX_ADAPTER_MAX_JSON_BYTES } from "./app-api-contract";
+import {
+  HDEX_ADAPTER_BODY_SENTINEL_KEY,
+  HDEX_ADAPTER_BODY_SENTINEL_VALUE,
+  HDEX_ADAPTER_MAX_JSON_BYTES,
+} from "./app-api-contract";
 
 const APP_RESPONSE_HEADER = "X-HDEX-API-Response";
 
@@ -77,11 +81,20 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   }
 }
 
+function hasAdapterBodySentinel(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>)[HDEX_ADAPTER_BODY_SENTINEL_KEY] ===
+      HDEX_ADAPTER_BODY_SENTINEL_VALUE
+  );
+}
+
 function throwSafeResponseError(input: {
   code:
     | "adapter_request_failed"
     | "access_session_required"
-    | "adapter_gateway_unavailable"
     | "adapter_non_app_response"
     | "adapter_invalid_json_response"
     | "adapter_response_contract_invalid";
@@ -100,10 +113,9 @@ function throwSafeResponseError(input: {
       input.response?.headers.get(APP_RESPONSE_HEADER) === "1",
     failureStage: input.stage,
   };
-  const visibleMessage = `${input.message} (HTTP ${diagnostics.httpStatus}, 단계: ${diagnostics.failureStage})`;
   throw errorFromJSON({
     code: input.code,
-    message: visibleMessage,
+    message: input.message,
     ...(input.response?.status ? { status: input.response.status } : {}),
     data: diagnostics,
   });
@@ -113,7 +125,7 @@ export async function fetchAppJson<T>(input: {
   path: string;
   init: RequestInit;
   isEnvelope: (value: unknown, status: number) => value is T;
-  allowHeaderlessEnvelope?: boolean;
+  allowHeaderlessAdapterError?: boolean;
 }): Promise<T> {
   const headers = new Headers(input.init.headers);
   headers.set("Accept", "application/json");
@@ -145,39 +157,22 @@ export async function fetchAppJson<T>(input: {
     });
   }
   const appHeaderMatches = response.headers.get(APP_RESPONSE_HEADER) === "1";
-  const contentType = normalizedContentType(response).value;
-  const contentTypeIsJson = contentType === "application/json";
+  const contentTypeIsJson = normalizedContentType(response).value === "application/json";
   if (!appHeaderMatches) {
-    if (input.allowHeaderlessEnvelope && contentType !== "text/html") {
-      // Cloudflare and reverse proxies can strip the app marker or rewrite the
-      // media type. Trust only a bounded body that still matches the exact
-      // route envelope; arbitrary JSON/HTML remains rejected below.
+    if (
+      input.allowHeaderlessAdapterError &&
+      response.status >= 400 &&
+      response.status < 600 &&
+      contentTypeIsJson
+    ) {
       const fallbackValue = await readBoundedJson(response);
       if (
         fallbackValue !== INVALID_BOUNDED_JSON &&
+        hasAdapterBodySentinel(fallbackValue) &&
         input.isEnvelope(fallbackValue, response.status)
       ) {
         return fallbackValue;
       }
-    }
-    if (
-      contentType === "text/html" &&
-      (response.status === 200 || response.status === 401 || response.status === 403)
-    ) {
-      throwSafeResponseError({
-        code: "access_session_required",
-        message: "사내 로그인 세션이 만료되었습니다. 페이지를 새로고침해 다시 로그인해 주세요.",
-        response,
-        stage: "app_header_missing",
-      });
-    }
-    if (response.status >= 500 && contentType === "text/html") {
-      throwSafeResponseError({
-        code: "adapter_gateway_unavailable",
-        message: "배포 서버 연결이 일시적으로 끊겼습니다. 잠시 후 서버 상태를 확인해 주세요.",
-        response,
-        stage: "app_header_missing",
-      });
     }
     throwSafeResponseError({
       code: "adapter_non_app_response",

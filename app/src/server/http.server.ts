@@ -3,10 +3,6 @@ import { renderErrorPage } from "../lib/error-page";
 export const NO_STORE_HEADERS = { "Cache-Control": "no-store" } as const;
 export const HDEX_API_RESPONSE_HEADER = "X-HDEX-API-Response";
 
-export function dependencySafeHttpStatus(status: number): number {
-  return status === 502 || status === 504 ? 424 : status;
-}
-
 export function jsonNoStore(value: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set("Cache-Control", "no-store");

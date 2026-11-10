@@ -18,15 +18,6 @@ test("Higgsfield user generation models are registered", async () => {
   assert.match(source, /gptImage2/);
 });
 
-test("Higgsfield OAuth callback returns immediately before MCP verification", async () => {
-  const source = await readFile(
-    resolve(root, "src/routes/api/higgsfield/oauth/callback.ts"),
-    "utf8",
-  );
-  assert.match(source, /handleOAuthCallback\(request\)/);
-  assert.doesNotMatch(source, /verifyHiggsfieldMcpSession|verifySession/);
-});
-
 test("folder references are bundled through the generated catalog", async () => {
   const catalog = JSON.parse(
     await readFile(resolve(root, "src/data/reference-catalog.json"), "utf8"),

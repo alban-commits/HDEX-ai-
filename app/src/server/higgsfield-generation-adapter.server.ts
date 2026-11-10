@@ -6,6 +6,7 @@ import {
   HiggsfieldMcpContentError,
   HiggsfieldMcpError,
   parseHiggsfieldMcpContent,
+  requireDiscoveredModel,
   type DiscoveredModelProfile,
   type HiggsfieldMcpParseFailure,
   type HiggsfieldMcpRejectionClass,
@@ -37,7 +38,7 @@ type FnfJob = {
 };
 
 type ToolInvoker = (
-  name: "generate_image" | "job_status" | "jobs_wait",
+  name: "generate_image" | "job_status",
   args: Record<string, unknown>,
 ) => Promise<Record<string, unknown>>;
 
@@ -104,42 +105,31 @@ function providerError(content: Record<string, unknown>): string | null {
 }
 
 function explicitProviderFailure(error: string): ApiJobError {
-  return toolProviderFailure(classifyHiggsfieldProviderRejection(error));
-}
-
-function toolProviderFailure(rejectionClass: HiggsfieldMcpRejectionClass): ApiJobError {
-  switch (rejectionClass) {
-    case "credits":
-      return new ApiJobError(
+  return classifyHiggsfieldProviderRejection(error) === "credits"
+    ? new ApiJobError(
         "insufficient_credits",
         "Higgsfield 개인 계정 크레딧을 확인해 주세요.",
         { status: 402 },
-      );
-    case "validation":
-      return new ApiJobError(
-        "provider_validation",
-        "Higgsfield가 현재 이미지 생성 요청 형식을 거부했습니다.",
-        { status: 422 },
-      );
-    case "permission":
-      return new ApiJobError(
-        "provider_permission",
-        "연결한 Higgsfield 계정에 현재 모델 사용 권한이 없습니다.",
-        { status: 403 },
-      );
-    case "moderation":
-      return new ApiJobError(
-        "provider_moderation",
-        "Higgsfield 안전 정책에 의해 이미지 생성 요청이 거부되었습니다.",
-        { status: 422 },
-      );
-    default:
-      return new ApiJobError(
+      )
+    : new ApiJobError(
         "provider_failure",
         "Higgsfield 이미지 생성 요청이 거부되었습니다.",
         { status: 502 },
       );
-  }
+}
+
+function toolProviderFailure(rejectionClass: HiggsfieldMcpRejectionClass): ApiJobError {
+  return rejectionClass === "credits"
+    ? new ApiJobError(
+        "insufficient_credits",
+        "Higgsfield 개인 계정 크레딧을 확인해 주세요.",
+        { status: 402 },
+      )
+    : new ApiJobError(
+        "provider_failure",
+        "Higgsfield 이미지 생성 요청이 거부되었습니다.",
+        { status: 502 },
+      );
 }
 
 function normalizeGenerateError(error: unknown): unknown {
@@ -252,55 +242,6 @@ function supportsAdvertisedAspect(profile: DiscoveredModelProfile, requested: st
   );
 }
 
-function builtInGenerationProfile(
-  jobSetType: FnfJob["job_set_type"],
-): DiscoveredModelProfile & { available: true; modelId: string } {
-  const sharedAspectRatios = ["9:16", "3:4", "2:3", "1:1", "4:3", "16:9"];
-  if (jobSetType === "text2image_soul_v2") {
-    return {
-      key: "soul_2",
-      displayName: "Soul 2",
-      available: true,
-      modelId: "soul_v2",
-      aspectRatios: sharedAspectRatios,
-      aspectRatioParameter: "aspect_ratio",
-      resolutionParameter: "quality",
-      resolutionValue: "2k",
-      mediaRole: "image",
-      maximumImages: 1,
-    };
-  }
-  if (jobSetType === "nano_banana_2") {
-    return {
-      key: "nano_banana_pro",
-      displayName: "Nano Banana Pro",
-      available: true,
-      modelId: "nano_banana_pro",
-      aspectRatios: ["2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "1:1"],
-      aspectRatioParameter: "aspect_ratio",
-      resolutionParameter: "resolution",
-      resolutionValue: "2k",
-      resolutionValues: { "2k": "2k", "4k": "4k" },
-      mediaRole: "image",
-      maximumImages: 14,
-    };
-  }
-  return {
-    key: "gpt_image_2",
-    displayName: "GPT Image 2.6",
-    available: true,
-    modelId: "gpt_image_2_6",
-    aspectRatios: [...sharedAspectRatios, "3:2"],
-    aspectRatioParameter: "aspect_ratio",
-    resolutionParameter: "resolution",
-    resolutionValue: "2k",
-    qualityParameter: "quality",
-    qualityValue: "high",
-    mediaRole: "image",
-    maximumImages: 14,
-  };
-}
-
 function executionParams(input: {
   fingerprint: string;
   jobSetType: FnfJob["job_set_type"];
@@ -310,13 +251,7 @@ function executionParams(input: {
   params: Record<string, unknown>;
 } {
   const modelKey = input.jobSetType === "text2image_soul_v2" ? "soul_2" : input.jobSetType === "nano_banana_2" ? "nano_banana_pro" : "gpt_image_2";
-  const discovered = getHiggsfieldCapabilityRecord(input.fingerprint)?.models.find(
-    (candidate) => candidate.key === modelKey,
-  );
-  const profile =
-    discovered?.available && discovered.modelId
-      ? (discovered as DiscoveredModelProfile & { available: true; modelId: string })
-      : builtInGenerationProfile(input.jobSetType);
+  const profile = requireDiscoveredModel(input.fingerprint, modelKey);
   const prompt = typeof input.params.prompt === "string" ? input.params.prompt.trim() : "";
   const count = Number(input.params.batch_size ?? 1);
   const aspectRatio =
@@ -341,9 +276,6 @@ function executionParams(input: {
     model: profile.modelId,
     prompt,
     count,
-    // The UI button displays and explicitly approves the credit price. Newer
-    // Higgsfield MCP servers otherwise return `unlim_choice` without creating a job.
-    use_unlim: false,
     [profile.aspectRatioParameter]: aspectValue,
   };
 
@@ -515,8 +447,8 @@ async function parseAndPersistCreatedJobs(
       else if (explicitModel === "nano_banana_2") resultLineage = "public_job_type";
     } else if (
       persistence.jobSetType === "gpt_image_2" &&
-      expectedModelId === "gpt_image_2_6" &&
-      explicitModel === "gpt_image_2_6"
+      expectedModelId === "gpt_image_2" &&
+      explicitModel === "gpt_image_2"
     ) {
       resultLineage = "provider_model";
     }
@@ -593,30 +525,6 @@ function parseStatusJob(
   content: Record<string, unknown>,
   expectedJobId: string,
 ): { status: FnfJob["status"]; remoteResultUrl?: string } {
-  if (Array.isArray(content.jobs)) {
-    const matching = content.jobs.filter(
-      (job): job is Record<string, unknown> =>
-        isRecord(job) && safeId(job.job_id) === expectedJobId,
-    );
-    if (matching.length !== 1) {
-      throw new ApiJobError("job_mismatch", "Higgsfield 생성 계보를 확인할 수 없습니다.", {
-        status: 502,
-      });
-    }
-    const status = providerStatus(matching[0]!.status);
-    if (!status) {
-      throw new ApiJobError("invalid_response", "Higgsfield 상태 응답이 올바르지 않습니다.", {
-        status: 502,
-      });
-    }
-    const remoteResultUrl = safeHttpsUrl(matching[0]!.result_url);
-    if (status === "completed" && !remoteResultUrl) {
-      throw new ApiJobError("invalid_response", "완료된 이미지 주소를 확인할 수 없습니다.", {
-        status: 502,
-      });
-    }
-    return { status, ...(remoteResultUrl ? { remoteResultUrl } : {}) };
-  }
   if (!isRecord(content.generation)) {
     throw new ApiJobError("status_unavailable", "Higgsfield 상태를 확인할 수 없습니다.", {
       status: 502,
@@ -871,13 +779,6 @@ export async function createHiggsfieldGeneration(input: {
         ? envelope.content.results.some((result) => isRecord(result) && safeId(result.id) !== null)
         : false;
       void responseRequestId(envelope.content);
-      if (isRecord(envelope.content.unlim_choice)) {
-        throw new ApiJobError(
-          "payment_choice_required",
-          "Higgsfield 결제 방식 선택이 필요합니다. 현재 화면은 표시된 크레딧 사용으로 다시 요청해 주세요.",
-          { status: 409 },
-        );
-      }
       if (explicitError) {
         rejectionClass = classifyHiggsfieldProviderRejection(explicitError);
         throw explicitProviderFailure(explicitError);
@@ -978,16 +879,8 @@ export async function getHiggsfieldGeneration(input: {
     const callTool =
       input.callTool ??
       ((name, args) => callHiggsfieldMcpTool({ session: input.session, name, args }));
-    const tools = getHiggsfieldCapabilityRecord(input.fingerprint)?.tools ?? [];
-    const usesCurrentStatus =
-      tools.length === 0 || tools.some((tool) => tool.name === "jobs_wait");
     const next = parseStatusJob(
-      usesCurrentStatus
-        ? await callTool("jobs_wait", {
-            jobs: [{ index: 0, job_id: stored.providerJobId }],
-            timeout_seconds: 0,
-          })
-        : await callTool("job_status", { jobId: stored.providerJobId, sync: false }),
+      await callTool("job_status", { jobId: stored.providerJobId, sync: false }),
       stored.providerJobId,
     );
     stored.status = next.status;

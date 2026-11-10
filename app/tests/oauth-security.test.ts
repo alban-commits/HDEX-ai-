@@ -39,7 +39,6 @@ const env = {
 function discoveryFetch(options: {
   token?: Record<string, unknown>;
   tokenHook?: (body: URLSearchParams) => Promise<Response> | Response;
-  userInfo?: Record<string, unknown>;
 } = {}): typeof fetch {
   return async (input, init) => {
     const url = new URL(String(input));
@@ -64,7 +63,6 @@ function discoveryFetch(options: {
         authorization_endpoint: "https://auth.higgsfield.ai/authorize",
         token_endpoint: "https://auth.higgsfield.ai/token",
         registration_endpoint: "https://auth.higgsfield.ai/register",
-        userinfo_endpoint: "https://auth.higgsfield.ai/userinfo",
         code_challenge_methods_supported: ["S256"],
         scopes_supported: ["openid", "email", "offline_access"],
       });
@@ -86,10 +84,6 @@ function discoveryFetch(options: {
           expires_in: 3_600,
         },
       );
-    }
-    if (url.pathname === "/userinfo") {
-      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer personal-access-token");
-      return Response.json(options.userInfo ?? { email: "account@example.com" });
     }
     throw new Error(`unexpected mock URL: ${url}`);
   };
@@ -254,7 +248,7 @@ describe("Higgsfield OAuth security contract", () => {
         method: "DELETE",
         headers: { origin: PUBLIC_ORIGIN, cookie: cookieHeader(first.cookies) },
       }),
-      { env, clearRuntime: (fingerprint) => { cleared.push(fingerprint); }, now: NOW + 1_000 },
+      { env, clearRuntime: (fingerprint) => { cleared.push(fingerprint); } },
     );
     expect(response.status).toBe(200);
     expect(cleared).toEqual([firstFingerprint]);
@@ -302,7 +296,6 @@ describe("Higgsfield OAuth security contract", () => {
       available: true,
       connected: true,
       transport: "mcp_oauth",
-      account: { email: "account@example.com" },
     });
     expect(statusText).not.toMatch(/access-token|refresh-token|dynamic-client-id/);
 
@@ -316,7 +309,6 @@ describe("Higgsfield OAuth security contract", () => {
       { env, fetchImpl: failedRefresh, now: NOW },
     );
     expect(await reconnect.json()).toMatchObject({ connected: false, reconnectRequired: true });
-    expect(reconnect.headers.get("set-cookie")).toBeNull();
 
     const disconnected = await handleOAuthDisconnect(
       new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/disconnect`, {
@@ -387,31 +379,6 @@ describe("Higgsfield OAuth security contract", () => {
     );
     expect(refreshCalls).toBe(1);
     expect(new URL(response.headers.get("location")!).origin).toBe("https://auth.higgsfield.ai");
-    expect(response.headers.get("set-cookie")).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
-  });
-
-  test("forces direct provider reauthentication when changing a connected account", async () => {
-    const { cookies } = await connectedCookies();
-    let discoveryCalls = 0;
-    const response = await handleOAuthConnect(
-      new Request(
-        `${PUBLIC_ORIGIN}/api/higgsfield/oauth/connect?return=/presets&account=change`,
-        { headers: { cookie: cookieHeader(cookies) } },
-      ),
-      {
-        env,
-        fetchImpl: async (...args) => {
-          discoveryCalls += 1;
-          return discoveryFetch()(...args);
-        },
-        now: NOW,
-      },
-    );
-    const authorization = new URL(response.headers.get("location")!);
-    expect(discoveryCalls).toBeGreaterThan(0);
-    expect(authorization.origin).toBe("https://auth.higgsfield.ai");
-    expect(authorization.searchParams.get("prompt")).toBe("login consent");
-    expect(authorization.searchParams.get("max_age")).toBe("0");
     expect(response.headers.get("set-cookie")).toContain(`${HIGGSFIELD_OAUTH_STATE_COOKIE}=`);
   });
 
@@ -490,39 +457,6 @@ describe("Higgsfield OAuth security contract", () => {
     const statusBody = (await status.json()) as Record<string, unknown>;
     expect(statusBody).toMatchObject({ connected: true });
     expect(statusBody).not.toHaveProperty("reconnectRequired");
-  });
-
-  test("clears an expired matching pending state without clearing the valid session", async () => {
-    const { cookies } = await connectedCookies();
-    const pending = await beginHiggsfieldOAuth(config, discoveryFetch(), NOW);
-    const requestCookies = `${cookieHeader(cookies)}; ${HIGGSFIELD_OAUTH_STATE_COOKIE}=${encodeURIComponent(pending.stateCookie)}`;
-    const callback = await handleOAuthCallback(
-      new Request(
-        `${config.callbackUrl}?code=expired-code&state=${encodeURIComponent(new URL(pending.authorizationUrl).searchParams.get("state")!)}`,
-        { headers: { cookie: requestCookies } },
-      ),
-      {
-        env,
-        fetchImpl: async () => {
-          throw new Error("expired state must not contact provider");
-        },
-        now: NOW + 11 * 60 * 1_000,
-      },
-    );
-    expect(callback.headers.get("location")).toBe(
-      `${PUBLIC_ORIGIN}/?higgsfield=error&reason=state_invalid`,
-    );
-    expect(callback.headers.get("set-cookie")).toContain(
-      `${HIGGSFIELD_OAUTH_STATE_COOKIE}=;`,
-    );
-
-    const status = await handleOAuthStatus(
-      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/status`, {
-        headers: { cookie: cookieHeader(cookies) },
-      }),
-      { env, now: NOW + 11 * 60 * 1_000 },
-    );
-    expect(await status.json()).toMatchObject({ connected: true });
   });
 
   test("does not accept a public origin downgrade or an arbitrary MCP endpoint", async () => {

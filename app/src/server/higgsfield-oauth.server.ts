@@ -53,7 +53,6 @@ type OAuthStatePayload = {
   verifier: string;
   clientId: string;
   tokenEndpoint: string;
-  userInfoEndpoint?: string;
   redirectUri: string;
   resource: string;
   returnPath: string;
@@ -67,8 +66,6 @@ export type HiggsfieldOAuthSession = {
   refreshToken: string;
   clientId: string;
   tokenEndpoint: string;
-  userInfoEndpoint?: string;
-  accountEmail?: string | null;
   resource: string;
   accessExpiresAt: number;
   sessionExpiresAt: number;
@@ -87,11 +84,10 @@ type OAuthServerMetadata = {
   authorization_endpoint: string;
   token_endpoint: string;
   registration_endpoint: string;
-  userinfo_endpoint?: string;
 };
 
 export type HiggsfieldOAuthStatusResult =
-  | { connected: true; accountEmail?: string; sessionCookies?: HiggsfieldOAuthCookieValues }
+  | { connected: true; sessionCookies?: HiggsfieldOAuthCookieValues }
   | { connected: false; reconnectRequired: boolean };
 
 const refreshFlights = new Map<
@@ -243,9 +239,6 @@ async function discoverOAuthMetadata(
   const authorizationEndpoint = assertProviderUrl(metadata.authorization_endpoint, issuer.url.origin);
   const tokenEndpoint = assertProviderUrl(metadata.token_endpoint, issuer.url.origin);
   const registrationEndpoint = assertProviderUrl(metadata.registration_endpoint, issuer.url.origin);
-  const userInfoEndpoint = typeof metadata.userinfo_endpoint === "string"
-    ? assertProviderUrl(metadata.userinfo_endpoint, issuer.url.origin)
-    : undefined;
   if (
     !Array.isArray(metadata.code_challenge_methods_supported) ||
     !metadata.code_challenge_methods_supported.includes("S256")
@@ -263,7 +256,6 @@ async function discoverOAuthMetadata(
     authorization_endpoint: authorizationEndpoint.toString(),
     token_endpoint: tokenEndpoint.toString(),
     registration_endpoint: registrationEndpoint.toString(),
-    ...(userInfoEndpoint ? { userinfo_endpoint: userInfoEndpoint.toString() } : {}),
   };
 }
 
@@ -311,7 +303,6 @@ function validState(value: unknown, now: number): value is OAuthStatePayload {
     typeof value.clientId === "string" &&
     SAFE_CLIENT_ID.test(value.clientId) &&
     typeof value.tokenEndpoint === "string" &&
-    (value.userInfoEndpoint === undefined || typeof value.userInfoEndpoint === "string") &&
     typeof value.redirectUri === "string" &&
     typeof value.resource === "string" &&
     typeof value.returnPath === "string" &&
@@ -334,8 +325,6 @@ function validSession(value: unknown, now: number): value is HiggsfieldOAuthSess
     typeof value.clientId === "string" &&
     SAFE_CLIENT_ID.test(value.clientId) &&
     typeof value.tokenEndpoint === "string" &&
-    (value.userInfoEndpoint === undefined || typeof value.userInfoEndpoint === "string") &&
-    (value.accountEmail === undefined || value.accountEmail === null || validAccountEmail(value.accountEmail)) &&
     typeof value.resource === "string" &&
     Number.isSafeInteger(value.accessExpiresAt) &&
     Number(value.accessExpiresAt) > 0 &&
@@ -382,7 +371,6 @@ export async function beginHiggsfieldOAuth(
   fetchImpl: typeof fetch = fetch,
   now = Date.now(),
   returnPath = "/",
-  selectAccount = false,
 ): Promise<{ authorizationUrl: string; stateCookie: string }> {
   const metadata = await discoverOAuthMetadata(config, fetchImpl);
   const clientId = await registerClient(metadata, config, fetchImpl);
@@ -400,10 +388,6 @@ export async function beginHiggsfieldOAuth(
   );
   authorization.searchParams.set("code_challenge_method", "S256");
   authorization.searchParams.set("resource", config.mcpUrl);
-  if (selectAccount) {
-    authorization.searchParams.set("prompt", "login consent");
-    authorization.searchParams.set("max_age", "0");
-  }
   return {
     authorizationUrl: authorization.toString(),
     stateCookie: sealCookie(
@@ -414,7 +398,6 @@ export async function beginHiggsfieldOAuth(
         verifier,
         clientId,
         tokenEndpoint: metadata.token_endpoint,
-        userInfoEndpoint: metadata.userinfo_endpoint,
         redirectUri: config.callbackUrl,
         resource: config.mcpUrl,
         returnPath: safeOAuthReturnPath(returnPath),
@@ -457,27 +440,6 @@ export function validateHiggsfieldOAuthCallbackState(input: {
   return validatedState({ ...input, now: input.now ?? Date.now() }).returnPath;
 }
 
-export function matchesHiggsfieldOAuthCallbackState(input: {
-  config: HiggsfieldOAuthConfig;
-  stateCookie: string | undefined;
-  returnedState: string | null;
-}): boolean {
-  const stored = openCookie(
-    HIGGSFIELD_OAUTH_STATE_COOKIE,
-    input.stateCookie,
-    input.config.cookieSecret,
-  );
-  return (
-    isRecord(stored) &&
-    stored.schemaVersion === "hdex.higgsfield-oauth-state.v1" &&
-    typeof stored.state === "string" &&
-    typeof input.returnedState === "string" &&
-    secureEqual(stored.state, input.returnedState) &&
-    stored.redirectUri === input.config.callbackUrl &&
-    stored.resource === input.config.mcpUrl
-  );
-}
-
 async function exchangeToken(
   endpoint: string,
   values: Record<string, string>,
@@ -518,33 +480,6 @@ function parseTokenResponse(body: Record<string, unknown>) {
   };
 }
 
-function validAccountEmail(value: unknown): value is string {
-  if (typeof value !== "string" || value.length === 0 || value.length > 254 || value.trim() !== value) {
-    return false;
-  }
-  if ([...value].some((character) => character.charCodeAt(0) <= 0x1f || character.charCodeAt(0) === 0x7f)) {
-    return false;
-  }
-  const at = value.indexOf("@");
-  return at > 0 && at === value.lastIndexOf("@") && at < value.length - 1;
-}
-
-async function fetchAccountEmail(
-  endpoint: string | undefined,
-  accessToken: string,
-  fetchImpl: typeof fetch,
-): Promise<string | null> {
-  if (!endpoint) return null;
-  const result = await fetchOAuthJson(fetchImpl, endpoint, {
-    method: "GET",
-    headers: { Accept: "application/json", Authorization: `Bearer ${accessToken}` },
-  });
-  if (!result.response.ok || !isRecord(result.body) || !validAccountEmail(result.body.email)) {
-    return null;
-  }
-  return result.body.email;
-}
-
 function secretPayload(value: string, bundleId: string): OAuthSecretPayload {
   return { schemaVersion: "hdex.higgsfield-oauth-secret.v1", bundleId, value };
 }
@@ -558,8 +493,6 @@ function sealSession(
     schemaVersion: session.schemaVersion,
     browserSessionId: session.browserSessionId,
     tokenEndpoint: session.tokenEndpoint,
-    userInfoEndpoint: session.userInfoEndpoint,
-    accountEmail: session.accountEmail,
     resource: session.resource,
     accessExpiresAt: session.accessExpiresAt,
     sessionExpiresAt: session.sessionExpiresAt,
@@ -613,11 +546,6 @@ export async function completeHiggsfieldOAuth(input: {
   );
   const token = parseTokenResponse(body);
   if (!token.refreshToken) throw new Error("higgsfield_oauth_refresh_token_required");
-  const accountEmail = await fetchAccountEmail(
-    stored.userInfoEndpoint,
-    token.accessToken,
-    input.fetchImpl ?? fetch,
-  ).catch(() => null);
   return {
     returnPath: stored.returnPath,
     sessionCookies: sealSession(input.config, {
@@ -627,8 +555,6 @@ export async function completeHiggsfieldOAuth(input: {
       refreshToken: token.refreshToken,
       clientId: stored.clientId,
       tokenEndpoint: stored.tokenEndpoint,
-      userInfoEndpoint: stored.userInfoEndpoint,
-      accountEmail,
       resource: stored.resource,
       accessExpiresAt: now + token.expiresIn * 1_000,
       sessionExpiresAt: now + HIGGSFIELD_OAUTH_SESSION_TTL_SECONDS * 1_000,
@@ -700,7 +626,6 @@ export function readHiggsfieldOAuthSession(
   if (!validSession(value, now)) return null;
   try {
     assertProviderUrl(value.tokenEndpoint);
-    if (value.userInfoEndpoint) assertProviderUrl(value.userInfoEndpoint);
     return value.resource === config.mcpUrl ? value : null;
   } catch {
     return null;
@@ -771,10 +696,7 @@ export async function getHiggsfieldOAuthStatus(input: {
   const session = readHiggsfieldOAuthSession(input.config, input.sessionCookies, now);
   if (!session) return { connected: false, reconnectRequired: false };
   if (session.accessExpiresAt - now > HIGGSFIELD_OAUTH_REFRESH_WINDOW_MS) {
-    return {
-      connected: true,
-      ...(typeof session.accountEmail === "string" ? { accountEmail: session.accountEmail } : {}),
-    };
+    return { connected: true };
   }
   for (const [key, value] of refreshFlights) {
     if (value.expiresAt <= now) refreshFlights.delete(key);

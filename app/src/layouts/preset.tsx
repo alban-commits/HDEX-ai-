@@ -37,14 +37,12 @@ import {
   disconnectHiggsfieldOAuth,
   GUEST_SCOPE_KEY,
   getReconnectSignInUrl,
-  clearStaleHiggsfieldOAuthError,
-  getHiggsfieldOAuthCallbackMessage,
   getSignInUrl,
   PRESET_JOBS,
   releaseAllLocalUploads,
   releaseLocalUpload,
-  stageLocalPoseAsset,
   subscribeHiggsfieldReconnect,
+  uploadAsset,
 } from "@/lib/fnf.browser";
 import { composeInfluencerProfile } from "@/lib/profile.browser";
 import { savePreferences } from "@/lib/preferences.functions";
@@ -177,11 +175,7 @@ export function PresetTemplate() {
   const [brief, setBrief] = useState("");
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [profileBusy, setProfileBusy] = useState(false);
-  const [message, setMessage] = useState(() =>
-    typeof window === "undefined"
-      ? ""
-      : (getHiggsfieldOAuthCallbackMessage(window.location.href) ?? ""),
-  );
+  const [message, setMessage] = useState("");
   const [activeTab, setActiveTab] = useState("json");
   const [pendingSignInUrl, setPendingSignInUrl] = useState<string | null>(null);
 
@@ -197,11 +191,6 @@ export function PresetTemplate() {
     [],
   );
   useEffect(() => releaseAllLocalUploads, []);
-  useEffect(() => {
-    if (resolvedScopeKey !== undefined && scopeKey !== GUEST_SCOPE_KEY) {
-      clearStaleHiggsfieldOAuthError();
-    }
-  }, [resolvedScopeKey, scopeKey]);
 
   const history = useInfiniteQuery({
     ...jobsFeedQueryOptions(jobClient, HISTORY_QUERY, { scopeKey }),
@@ -285,7 +274,7 @@ export function PresetTemplate() {
   }, [pose]);
 
   const handleUpload = useCallback(async (file: File) => {
-    const selected = stageLocalPoseAsset(file);
+    const selected = await uploadAsset(file);
     const item = { ...selected, kind: "upload" as const, personal: true };
     setUploads((current) => [item, ...current.filter((entry) => entry.ref?.id !== item.ref?.id)]);
     selectPose(selected);
@@ -324,7 +313,11 @@ export function PresetTemplate() {
       await disconnectHiggsfieldOAuth();
       clearInfluencerWorkspace();
       if (reconnect) {
-        window.location.assign(getReconnectSignInUrl(window.location.pathname));
+        setPendingSignInUrl(
+          getReconnectSignInUrl(
+            `${window.location.pathname}${window.location.search}${window.location.hash}`,
+          ),
+        );
       } else {
         window.location.reload();
       }

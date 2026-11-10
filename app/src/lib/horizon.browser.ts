@@ -185,7 +185,7 @@ export async function composeHorizonPrompt(input: { brief: string; ratio: string
     categories.push(image.category);
   }
   form.set("data", JSON.stringify({ brief: input.brief, ratio: input.ratio, targetView: input.targetView, categories }));
-  const result = await fetchAppJson<HorizonPromptResponse>({ path: "/api/openai/horizon", init: { method: "POST", credentials: "include", body: form }, isEnvelope: isResponse, allowHeaderlessEnvelope: true });
+  const result = await fetchAppJson<HorizonPromptResponse>({ path: "/api/openai/horizon", init: { method: "POST", credentials: "include", body: form }, isEnvelope: isResponse });
   if (!result.ok && result.code === "oauth_required") notifyHiggsfieldReconnectRequired();
   return result;
 }

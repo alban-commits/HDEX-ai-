@@ -4,14 +4,10 @@ import { composeInfluencerProfile } from "@/lib/profile.functions";
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-request-security";
 import {
   appendOAuthSessionCookies,
+  clearAllOAuthCookies,
   requireActiveOAuthSession,
 } from "./oauth-routes.server";
-import {
-  dependencySafeHttpStatus,
-  jsonNoStore,
-  NO_STORE_HEADERS,
-  rejectCrossSiteMutation,
-} from "./http.server";
+import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
 import { validateImageBytes } from "./image-validation.server";
 
 const profileInput = z.object({
@@ -26,6 +22,7 @@ export async function handleOpenAiProfile(request: Request): Promise<Response> {
   const active = await requireActiveOAuthSession(request);
   if (!active) {
     const headers = new Headers(NO_STORE_HEADERS);
+    clearAllOAuthCookies(headers);
     return jsonNoStore(
       {
         ok: false,
@@ -74,10 +71,7 @@ export async function handleOpenAiProfile(request: Request): Promise<Response> {
       publicOrigin: active.config.publicOrigin,
       publicDirectory: resolve(process.cwd(), "public"),
     });
-    return jsonNoStore(result, {
-      status: result.ok ? 200 : dependencySafeHttpStatus(502),
-      headers,
-    });
+    return jsonNoStore(result, { status: result.ok ? 200 : 502, headers });
   } catch {
     return jsonNoStore(
       { ok: false, code: "invalid_input", message: "입력 이미지를 확인해 주세요." },

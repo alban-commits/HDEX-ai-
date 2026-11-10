@@ -1,7 +1,7 @@
 import { getRemoteResultUrl } from "./higgsfield-generation-adapter.server";
 import { higgsfieldOAuthSessionFingerprint } from "./higgsfield-oauth.server";
 import { appendOAuthSessionCookies, requireActiveOAuthSession } from "./oauth-routes.server";
-import { dependencySafeHttpStatus, NO_STORE_HEADERS } from "./http.server";
+import { NO_STORE_HEADERS } from "./http.server";
 import { downloadResultThroughTemporaryFile } from "./result-download.server";
 
 export async function handleHiggsfieldResult(request: Request, jobId: string): Promise<Response> {
@@ -20,7 +20,7 @@ export async function handleHiggsfieldResult(request: Request, jobId: string): P
   } catch {
     return Response.json(
       { error: "result_download_failed" },
-      { status: dependencySafeHttpStatus(502), headers: NO_STORE_HEADERS },
+      { status: 502, headers: NO_STORE_HEADERS },
     );
   }
 }

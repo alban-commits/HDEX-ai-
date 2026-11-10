@@ -224,6 +224,7 @@ function ScopedApp() {
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
   });
+
   if (scope.error != null) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-q-background-primary px-4">
