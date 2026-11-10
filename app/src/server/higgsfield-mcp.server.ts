@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { HiggsfieldOAuthSession } from "./higgsfield-oauth.server";
 
 export const HIGGSFIELD_MCP_TIMEOUT_MS = 25_000;
+export const HIGGSFIELD_MCP_CLOSE_TIMEOUT_MS = 1_000;
 export const HIGGSFIELD_MCP_MAX_RESPONSE_BYTES = 1024 * 1024;
 export const HIGGSFIELD_MCP_MAX_PAGES = 8;
 export const HIGGSFIELD_MCP_MAX_TOOLS = 256;
@@ -265,6 +266,24 @@ async function boundedResponse(response: Response): Promise<Response> {
   });
 }
 
+export async function closeHiggsfieldMcpClient(
+  client: Pick<Client, "close">,
+  timeoutMs = HIGGSFIELD_MCP_CLOSE_TIMEOUT_MS,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  try {
+    await Promise.race([
+      client.close().catch(() => undefined),
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function withOfficialMcpClient<T>(input: {
   mcpUrl: string;
   accessToken: string;
@@ -331,7 +350,10 @@ async function withOfficialMcpClient<T>(input: {
     throw new HiggsfieldMcpError("invalid_response");
   } finally {
     clearTimeout(timer);
-    await client.close().catch(() => undefined);
+    // A provider transport can leave its DELETE/session-close request hanging
+    // after the actual tool call has settled. Never let cleanup hold the HTTP
+    // route open until the reverse proxy replaces our JSON with a gateway 502.
+    await closeHiggsfieldMcpClient(client);
   }
 }
 

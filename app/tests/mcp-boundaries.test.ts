@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   callHiggsfieldMcpTool,
+  closeHiggsfieldMcpClient,
   clearHiggsfieldRuntime,
   getHiggsfieldCapabilitySummary,
   HiggsfieldMcpError,
@@ -299,6 +300,20 @@ async function capturedError(operation: () => Promise<unknown>): Promise<unknown
 }
 
 describe("Higgsfield MCP discovery boundary", () => {
+  test("bounds a provider MCP close that never settles", async () => {
+    let closeCalls = 0;
+    await closeHiggsfieldMcpClient(
+      {
+        close: () => {
+          closeCalls += 1;
+          return new Promise<void>(() => undefined);
+        },
+      },
+      5,
+    );
+    expect(closeCalls).toBe(1);
+  });
+
   test("accepts the current models_get and jobs_wait MCP contract", async () => {
     const calls: string[] = [];
     const record = await inspectHiggsfieldProvider({
