@@ -287,9 +287,9 @@ function builtInGenerationProfile(
   }
   return {
     key: "gpt_image_2",
-    displayName: "GPT Image 2",
+    displayName: "GPT Image 2.6",
     available: true,
-    modelId: "gpt_image_2",
+    modelId: "gpt_image_2_6",
     aspectRatios: [...sharedAspectRatios, "3:2"],
     aspectRatioParameter: "aspect_ratio",
     resolutionParameter: "resolution",
@@ -341,6 +341,9 @@ function executionParams(input: {
     model: profile.modelId,
     prompt,
     count,
+    // The UI button displays and explicitly approves the credit price. Newer
+    // Higgsfield MCP servers otherwise return `unlim_choice` without creating a job.
+    use_unlim: false,
     [profile.aspectRatioParameter]: aspectValue,
   };
 
@@ -512,8 +515,8 @@ async function parseAndPersistCreatedJobs(
       else if (explicitModel === "nano_banana_2") resultLineage = "public_job_type";
     } else if (
       persistence.jobSetType === "gpt_image_2" &&
-      expectedModelId === "gpt_image_2" &&
-      explicitModel === "gpt_image_2"
+      expectedModelId === "gpt_image_2_6" &&
+      explicitModel === "gpt_image_2_6"
     ) {
       resultLineage = "provider_model";
     }
@@ -868,6 +871,13 @@ export async function createHiggsfieldGeneration(input: {
         ? envelope.content.results.some((result) => isRecord(result) && safeId(result.id) !== null)
         : false;
       void responseRequestId(envelope.content);
+      if (isRecord(envelope.content.unlim_choice)) {
+        throw new ApiJobError(
+          "payment_choice_required",
+          "Higgsfield 결제 방식 선택이 필요합니다. 현재 화면은 표시된 크레딧 사용으로 다시 요청해 주세요.",
+          { status: 409 },
+        );
+      }
       if (explicitError) {
         rejectionClass = classifyHiggsfieldProviderRejection(explicitError);
         throw explicitProviderFailure(explicitError);

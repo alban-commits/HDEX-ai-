@@ -1024,7 +1024,7 @@ const aspects = ["2:3","3:2","3:4","4:3","9:16","16:9","1:1"];
 function model(id:string) {
   if(id==="nano_banana_pro") return {id,name:"Google Nano Banana Pro",provider_name:"Google",output_type:"image",aspect_ratios:aspects,parameters:[{name:"aspect_ratio",options:aspects},{name:"resolution",options:["2k","4k"]}],medias:[{roles:["reference"],max:14}]};
   if(id==="soul_v2") return {id,name:"Higgsfield Soul V2",provider_name:"Higgsfield",output_type:"image",aspect_ratios:aspects.filter((v)=>v!=="3:2"),parameters:[{name:"aspect_ratio",options:aspects.filter((v)=>v!=="3:2")},{name:"quality",options:["1.5k","2k"]}],medias:[{roles:["reference"],max:1}]};
-  return {id,name:"GPT Image 2",provider_name:"OpenAI",output_type:"image",aspect_ratios:aspects,parameters:[{name:"aspect_ratio",options:aspects},{name:"resolution",options:["2k"]},{name:"quality",options:["high"]}],medias:[{roles:["reference"],max:14}]};
+  return {id,name:"GPT Image 2.6",provider_name:"OpenAI",output_type:"image",aspect_ratios:aspects,parameters:[{name:"aspect_ratio",options:aspects},{name:"resolution",options:["2k"]},{name:"quality",options:["high"]}],medias:[{roles:["reference"],max:14}]};
 }
 const session:HiggsfieldOAuthSession={schemaVersion:"hdex.higgsfield-oauth-session.v1",accessToken:"same-provider-account",refreshToken:"same-refresh",clientId:"browser-a",tokenEndpoint:"https://auth.higgsfield.ai/token",resource:"https://mcp.higgsfield.ai/mcp",accessExpiresAt:NOW+3600000,sessionExpiresAt:NOW+86400000};
 
@@ -1067,7 +1067,7 @@ describe("Nano Banana Pro MCP boundary", () => {
       { jobSetType: "nano_banana_2" as const, responseModel: "nano_banana_pro", lineage: "provider_model", accepted: true, marker: "p" },
       { jobSetType: "nano_banana_2" as const, responseModel: "nano_banana_2", lineage: "public_job_type", accepted: true, marker: "j" },
       { jobSetType: "nano_banana_2" as const, responseModel: "nano_banana_v2", lineage: "conflict", accepted: false, marker: "x" },
-      { jobSetType: "gpt_image_2" as const, responseModel: "gpt_image_2", lineage: "provider_model", accepted: true, marker: "g" },
+      { jobSetType: "gpt_image_2" as const, responseModel: "gpt_image_2_6", lineage: "provider_model", accepted: true, marker: "g" },
     ];
     for (const [index, scenario] of scenarios.entries()) {
       const activeSession = { ...session, browserSessionId: scenario.marker.repeat(43) };
@@ -1152,7 +1152,7 @@ describe("Nano Banana Pro MCP boundary", () => {
   test("allows 14 GPT/Nano references and blocks 15 before generate_image", async () => {
     const record=await inspectHiggsfieldProvider({includeNano:true,now:NOW,listTools:async()=>({tools:toolList}),callTool:async(_name,args)=>({structuredContent:model(String(args.model_id))})});
     for (const target of [
-      { jobSetType: "gpt_image_2" as const, providerModel: "gpt_image_2", extra: { quality: "high" }, field: "medias" },
+      { jobSetType: "gpt_image_2" as const, providerModel: "gpt_image_2_6", extra: { quality: "high" }, field: "medias" },
       { jobSetType: "nano_banana_2" as const, providerModel: "nano_banana_pro", extra: {}, field: "input_images" },
     ]) {
       const activeSession = { ...session, browserSessionId: (target.jobSetType === "gpt_image_2" ? "g" : "b").repeat(43) };
