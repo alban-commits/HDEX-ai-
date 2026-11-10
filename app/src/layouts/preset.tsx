@@ -38,6 +38,7 @@ import {
   GUEST_SCOPE_KEY,
   getReconnectSignInUrl,
   clearStaleHiggsfieldOAuthError,
+  getHiggsfieldOAuthCallbackMessage,
   getSignInUrl,
   PRESET_JOBS,
   releaseAllLocalUploads,
@@ -176,7 +177,11 @@ export function PresetTemplate() {
   const [brief, setBrief] = useState("");
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [profileBusy, setProfileBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(() =>
+    typeof window === "undefined"
+      ? ""
+      : (getHiggsfieldOAuthCallbackMessage(window.location.href) ?? ""),
+  );
   const [activeTab, setActiveTab] = useState("json");
   const [pendingSignInUrl, setPendingSignInUrl] = useState<string | null>(null);
 

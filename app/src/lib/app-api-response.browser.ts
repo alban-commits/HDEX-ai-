@@ -100,9 +100,10 @@ function throwSafeResponseError(input: {
       input.response?.headers.get(APP_RESPONSE_HEADER) === "1",
     failureStage: input.stage,
   };
+  const visibleMessage = `${input.message} (HTTP ${diagnostics.httpStatus}, 단계: ${diagnostics.failureStage})`;
   throw errorFromJSON({
     code: input.code,
-    message: input.message,
+    message: visibleMessage,
     ...(input.response?.status ? { status: input.response.status } : {}),
     data: diagnostics,
   });

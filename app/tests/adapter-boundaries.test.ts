@@ -101,6 +101,7 @@ describe("Higgsfield adapter JSON boundary", () => {
         operation: null,
         status: 401,
         errorCode: "oauth_required",
+        failureStage: "session",
       },
     ]);
   });
@@ -158,6 +159,7 @@ describe("Higgsfield adapter JSON boundary", () => {
         operation: "createJobs",
         status: 503,
         errorCode: "generation_disabled",
+        failureStage: "provider",
       });
       expect(diagnostics[0]).not.toContain("not transmitted");
       expect(diagnostics[0]).not.toContain(activeSession.session.accessToken);
@@ -226,10 +228,14 @@ describe("Higgsfield adapter JSON boundary", () => {
           },
         },
       );
-      const body = await expectSafeJson(response, 502);
+      const body = await expectSafeJson(response, 424);
       expect(body).toMatchObject({
         ok: false,
-        error: { code: "outcome_unknown", status: 502 },
+        error: {
+          code: "outcome_unknown",
+          status: 502,
+          data: { failureStage: "provider" },
+        },
       });
       expect(JSON.stringify(body)).not.toContain("generationStage");
       expect(JSON.stringify(body)).not.toContain("requestDurationMs");
@@ -238,8 +244,10 @@ describe("Higgsfield adapter JSON boundary", () => {
         event: "higgsfield_adapter_response",
         routeReached: true,
         operation: "createJobs",
-        status: 502,
+        status: 424,
         errorCode: "outcome_unknown",
+        upstreamStatus: 502,
+        failureStage: "provider",
         generationStage: "generate_image",
         providerErrorPresent: false,
         toolErrorPresent: true,
@@ -291,6 +299,7 @@ describe("Higgsfield adapter JSON boundary", () => {
         operation: null,
         status: 400,
         errorCode: "validation",
+        failureStage: "input",
       },
       {
         event: "higgsfield_adapter_response",
@@ -298,6 +307,7 @@ describe("Higgsfield adapter JSON boundary", () => {
         operation: null,
         status: 500,
         errorCode: "unexpected",
+        failureStage: "session",
       },
     ]);
     expect(diagnostics.join("\n")).not.toContain("private-token");

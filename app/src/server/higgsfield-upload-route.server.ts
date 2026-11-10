@@ -5,7 +5,12 @@ import {
   appendOAuthSessionCookies,
   requireActiveOAuthSession,
 } from "./oauth-routes.server";
-import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
+import {
+  dependencySafeHttpStatus,
+  jsonNoStore,
+  NO_STORE_HEADERS,
+  rejectCrossSiteMutation,
+} from "./http.server";
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-request-security";
 import { readFile } from "node:fs/promises";
 import { normalizeHiggsfieldUploadImage } from "./image-validation.server";
@@ -110,9 +115,16 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
       code: payload.code,
       status: payload.status ?? 500,
     });
+    const upstreamStatus = payload.status ?? 500;
     return jsonNoStore(
-      { ok: false, error: payload },
-      { status: payload.status ?? 500, headers },
+      {
+        ok: false,
+        error: {
+          ...payload,
+          data: { failureStage: stage },
+        },
+      },
+      { status: dependencySafeHttpStatus(upstreamStatus), headers },
     );
   }
 }

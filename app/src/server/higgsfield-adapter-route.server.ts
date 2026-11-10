@@ -19,7 +19,12 @@ import {
   requireActiveOAuthSession,
   type ActiveOAuthSession,
 } from "./oauth-routes.server";
-import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
+import {
+  dependencySafeHttpStatus,
+  jsonNoStore,
+  NO_STORE_HEADERS,
+  rejectCrossSiteMutation,
+} from "./http.server";
 import {
   invalidateHiggsfieldAuthentication,
   isHiggsfieldAuthenticationFailure,
@@ -78,15 +83,19 @@ export async function handleHiggsfieldAdapter(
   let fingerprint: string | undefined;
   let operationName: string | null = null;
   let generationDiagnostic: HiggsfieldGenerationDiagnostic | undefined;
+  let failureStage = "session";
   const respond = (value: unknown, status: number, errorCode: string): Response => {
+    const transportStatus = dependencySafeHttpStatus(status);
     const safeErrorCode = /^[a-z0-9_]{1,64}$/.test(errorCode) ? errorCode : "unexpected";
     (options.logDiagnostic ?? console.info)(
       JSON.stringify({
         event: "higgsfield_adapter_response",
         routeReached: true,
         operation: operationName,
-        status,
+        status: transportStatus,
+        ...(transportStatus !== status ? { upstreamStatus: status } : {}),
         errorCode: safeErrorCode,
+        ...(safeErrorCode !== "ok" ? { failureStage } : {}),
         ...(generationDiagnostic ?? {}),
       }),
     );
@@ -96,7 +105,7 @@ export async function handleHiggsfieldAdapter(
           [HDEX_ADAPTER_BODY_SENTINEL_KEY]: HDEX_ADAPTER_BODY_SENTINEL_VALUE,
         }
       : value;
-    return jsonNoStore(body, { status, headers });
+    return jsonNoStore(body, { status: transportStatus, headers });
   };
   try {
     const active = await (options.requireActiveOAuthSession ?? requireActiveOAuthSession)(request);
@@ -114,6 +123,7 @@ export async function handleHiggsfieldAdapter(
         "oauth_required",
       );
     }
+    failureStage = "origin";
     const crossSite = rejectCrossSiteMutation(request, active.config.publicOrigin);
     if (crossSite) {
       return respond(
@@ -131,12 +141,14 @@ export async function handleHiggsfieldAdapter(
     }
     if (active.rotatedCookies) appendOAuthSessionCookies(headers, active.rotatedCookies);
     fingerprint = higgsfieldOAuthSessionFingerprint(active.session);
+    failureStage = "input";
     const input = await readInput(request);
     const operation = input.operation;
     operationName =
       typeof operation === "string" && ADAPTER_OPERATIONS.has(operation) ? operation : null;
     const data = isRecord(input.data) ? input.data : {};
     let value: unknown;
+    failureStage = "provider";
     switch (operation) {
       case "createJobs":
         if (
@@ -246,6 +258,7 @@ export async function handleHiggsfieldAdapter(
           status: 405,
         });
     }
+    failureStage = "response";
     return respond({ ok: true, value }, 200, "ok");
   } catch (error) {
     if (isHiggsfieldAuthenticationFailure(error)) {
@@ -268,7 +281,7 @@ export async function handleHiggsfieldAdapter(
         "oauth_required",
       );
     }
-    const payload =
+    const sourcePayload =
       error instanceof ApiJobError
         ? error.toJSON()
         : error instanceof HiggsfieldMcpError
@@ -278,6 +291,13 @@ export async function handleHiggsfieldAdapter(
               status: 502,
             }
           : { code: "unexpected", message: "서버 연결 요청을 처리하지 못했습니다." };
+    const payload = {
+      ...sourcePayload,
+      data: {
+        ...(isRecord(sourcePayload.data) ? sourcePayload.data : {}),
+        failureStage,
+      },
+    };
     const status = payload.status ?? 500;
     return respond(
       { ok: false, error: payload },

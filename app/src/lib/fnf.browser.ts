@@ -116,7 +116,16 @@ function throwAdapterError(error: {
   if (requiresReconnect(error)) {
     notifyHiggsfieldReconnectRequired();
   }
-  throw errorFromJSON(error);
+  const failureStage = isRecord(error.data) && typeof error.data.failureStage === "string"
+    ? error.data.failureStage
+    : null;
+  throw errorFromJSON({
+    ...error,
+    message:
+      failureStage && error.status
+        ? `${error.message} (HTTP ${error.status}, 단계: ${failureStage})`
+        : error.message,
+  });
 }
 
 export function subscribeHiggsfieldReconnect(listener: ReconnectListener): () => void {
@@ -247,6 +256,21 @@ export function clearStaleHiggsfieldOAuthError(): void {
   url.searchParams.delete("higgsfield");
   url.searchParams.delete("reason");
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+export function getHiggsfieldOAuthCallbackMessage(href: string): string | null {
+  const url = new URL(href);
+  if (url.searchParams.get("higgsfield") !== "error") return null;
+  switch (url.searchParams.get("reason")) {
+    case "state_invalid":
+      return "Higgsfield 재연결이 완료되지 않았습니다. 계정 연결을 다시 시작해 주세요.";
+    case "canceled":
+      return "Higgsfield 계정 연결이 취소되었습니다.";
+    case "timeout":
+      return "Higgsfield 계정 연결 시간이 초과되었습니다. 다시 연결해 주세요.";
+    default:
+      return "Higgsfield 계정 연결에 실패했습니다. 다시 연결해 주세요.";
+  }
 }
 
 type UploadResponse =

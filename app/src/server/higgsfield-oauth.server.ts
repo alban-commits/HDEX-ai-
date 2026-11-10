@@ -457,6 +457,27 @@ export function validateHiggsfieldOAuthCallbackState(input: {
   return validatedState({ ...input, now: input.now ?? Date.now() }).returnPath;
 }
 
+export function matchesHiggsfieldOAuthCallbackState(input: {
+  config: HiggsfieldOAuthConfig;
+  stateCookie: string | undefined;
+  returnedState: string | null;
+}): boolean {
+  const stored = openCookie(
+    HIGGSFIELD_OAUTH_STATE_COOKIE,
+    input.stateCookie,
+    input.config.cookieSecret,
+  );
+  return (
+    isRecord(stored) &&
+    stored.schemaVersion === "hdex.higgsfield-oauth-state.v1" &&
+    typeof stored.state === "string" &&
+    typeof input.returnedState === "string" &&
+    secureEqual(stored.state, input.returnedState) &&
+    stored.redirectUri === input.config.callbackUrl &&
+    stored.resource === input.config.mcpUrl
+  );
+}
+
 async function exchangeToken(
   endpoint: string,
   values: Record<string, string>,

@@ -943,7 +943,7 @@ describe("Horizon prompt contract", () => {
     expect(HORIZON_PROMPT_MAX_TOTAL_BYTES).toBe(80 * 1024 * 1024);
   });
 
-  test("returns a safe 502 for an OpenAI provider failure", async () => {
+  test("returns a Cloudflare-safe dependency failure for an OpenAI provider failure", async () => {
     const image = new Uint8Array(await sharp({ create: { width: 2, height: 2, channels: 3, background: "#fff" } }).png().toBuffer());
     const form = new FormData();
     form.append("image", new File([image], "model.png", { type: "image/png" }));
@@ -952,7 +952,7 @@ describe("Horizon prompt contract", () => {
       requireSession: async () => ({ config: { publicOrigin: "https://hdex-ai.company.example" }, session: {}, rotatedCookies: null } as never),
       composePrompt: async () => { throw new Error("private_provider_detail"); },
     });
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(424);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ ok: false, code: "provider_error", message: "GPT 명령어 작성 요청에 실패했습니다." });
   });

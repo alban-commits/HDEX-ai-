@@ -4,6 +4,7 @@ import {
   fnfBrowserAdapter,
   getReconnectSignInUrl,
   clearStaleHiggsfieldOAuthError,
+  getHiggsfieldOAuthCallbackMessage,
   getFnfScopeKey,
   getLocalUploadFile,
   getSignInUrl,
@@ -142,6 +143,15 @@ test("clears a stale OAuth callback error after a valid session is restored", ()
   } finally {
     Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
   }
+});
+
+test("explains an incomplete OAuth reconnection from the callback URL", () => {
+  expect(
+    getHiggsfieldOAuthCallbackMessage(
+      "https://hdex-ai.dfcorp.shop/?higgsfield=error&reason=state_invalid",
+    ),
+  ).toBe("Higgsfield 재연결이 완료되지 않았습니다. 계정 연결을 다시 시작해 주세요.");
+  expect(getHiggsfieldOAuthCallbackMessage("https://hdex-ai.dfcorp.shop/")).toBeNull();
 });
 
 test("mints a fresh single-use confirmation token for every explicit submit", async () => {

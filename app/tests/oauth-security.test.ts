@@ -492,6 +492,39 @@ describe("Higgsfield OAuth security contract", () => {
     expect(statusBody).not.toHaveProperty("reconnectRequired");
   });
 
+  test("clears an expired matching pending state without clearing the valid session", async () => {
+    const { cookies } = await connectedCookies();
+    const pending = await beginHiggsfieldOAuth(config, discoveryFetch(), NOW);
+    const requestCookies = `${cookieHeader(cookies)}; ${HIGGSFIELD_OAUTH_STATE_COOKIE}=${encodeURIComponent(pending.stateCookie)}`;
+    const callback = await handleOAuthCallback(
+      new Request(
+        `${config.callbackUrl}?code=expired-code&state=${encodeURIComponent(new URL(pending.authorizationUrl).searchParams.get("state")!)}`,
+        { headers: { cookie: requestCookies } },
+      ),
+      {
+        env,
+        fetchImpl: async () => {
+          throw new Error("expired state must not contact provider");
+        },
+        now: NOW + 11 * 60 * 1_000,
+      },
+    );
+    expect(callback.headers.get("location")).toBe(
+      `${PUBLIC_ORIGIN}/?higgsfield=error&reason=state_invalid`,
+    );
+    expect(callback.headers.get("set-cookie")).toContain(
+      `${HIGGSFIELD_OAUTH_STATE_COOKIE}=;`,
+    );
+
+    const status = await handleOAuthStatus(
+      new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/status`, {
+        headers: { cookie: cookieHeader(cookies) },
+      }),
+      { env, now: NOW + 11 * 60 * 1_000 },
+    );
+    expect(await status.json()).toMatchObject({ connected: true });
+  });
+
   test("does not accept a public origin downgrade or an arbitrary MCP endpoint", async () => {
     const badOrigin = { ...env, HDEX_PUBLIC_ORIGIN: "http://hdex-ai.company.example" };
     const badMcp = { ...env, HDEX_HIGGSFIELD_MCP_URL: "https://example.com/mcp" };

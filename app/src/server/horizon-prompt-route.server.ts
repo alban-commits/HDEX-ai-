@@ -2,7 +2,12 @@ import { z } from "zod";
 import { HORIZON_MAX_IMAGES, HORIZON_RATIOS, HORIZON_VIEWS } from "@/lib/horizon";
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-request-security";
 import { composeHorizonPrompt, type HorizonPromptImage } from "./horizon-prompt.server";
-import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
+import {
+  dependencySafeHttpStatus,
+  jsonNoStore,
+  NO_STORE_HEADERS,
+  rejectCrossSiteMutation,
+} from "./http.server";
 import { validateImageBytes } from "./image-validation.server";
 import { appendOAuthSessionCookies, requireActiveOAuthSession } from "./oauth-routes.server";
 
@@ -78,8 +83,8 @@ export async function handleHorizonPrompt(
   }
   try {
     const result = await (dependencies.composePrompt ?? composeHorizonPrompt)({ brief: parsed.brief, ratio: parsed.ratio, targetView: parsed.targetView, images: parsed.images });
-    return jsonNoStore(result, { status: result.ok ? 200 : 502, headers });
+    return jsonNoStore(result, { status: result.ok ? 200 : dependencySafeHttpStatus(502), headers });
   } catch {
-    return jsonNoStore({ ok: false, code: "provider_error", message: "GPT 명령어 작성 요청에 실패했습니다." }, { status: 502, headers });
+    return jsonNoStore({ ok: false, code: "provider_error", message: "GPT 명령어 작성 요청에 실패했습니다." }, { status: dependencySafeHttpStatus(502), headers });
   }
 }

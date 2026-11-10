@@ -11,6 +11,7 @@ import {
   HIGGSFIELD_OAUTH_SESSION_TTL_SECONDS,
   HIGGSFIELD_OAUTH_STATE_COOKIE,
   HIGGSFIELD_OAUTH_STATE_TTL_SECONDS,
+  matchesHiggsfieldOAuthCallbackState,
   readHiggsfieldOAuthSession,
   safeOAuthReturnPath,
   validateHiggsfieldOAuthCallbackState,
@@ -200,6 +201,15 @@ export async function handleOAuthCallback(
     });
   } catch {
     const response = oauthRedirect(config, "/", "error", "state_invalid");
+    if (
+      matchesHiggsfieldOAuthCallbackState({
+        config,
+        stateCookie,
+        returnedState: url.searchParams.get("state"),
+      })
+    ) {
+      clearSealedCookie(response.headers, HIGGSFIELD_OAUTH_STATE_COOKIE, "/api/higgsfield/oauth");
+    }
     return response;
   }
   const providerError = url.searchParams.get("error");
