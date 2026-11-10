@@ -93,6 +93,7 @@ describe("Higgsfield adapter JSON boundary", () => {
       error: { code: "oauth_required", data: { reconnectRequired: true } },
     });
     expect(body[HDEX_ADAPTER_BODY_SENTINEL_KEY]).toBe(HDEX_ADAPTER_BODY_SENTINEL_VALUE);
+    expect(response.headers.get("set-cookie")).toBeNull();
     expect(diagnostics.map((line) => JSON.parse(line))).toEqual([
       {
         event: "higgsfield_adapter_response",

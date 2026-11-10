@@ -3,7 +3,6 @@ import { higgsfieldOAuthSessionFingerprint } from "./higgsfield-oauth.server";
 import { uploadHiggsfieldImage } from "./higgsfield-media.server";
 import {
   appendOAuthSessionCookies,
-  clearAllOAuthCookies,
   requireActiveOAuthSession,
 } from "./oauth-routes.server";
 import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
@@ -20,7 +19,6 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
   const active = await requireActiveOAuthSession(request);
   if (!active) {
     const headers = new Headers(NO_STORE_HEADERS);
-    clearAllOAuthCookies(headers);
     return jsonNoStore(
       {
         ok: false,
@@ -89,7 +87,7 @@ export async function handleHiggsfieldUpload(request: Request): Promise<Response
     return jsonNoStore({ ok: true, ref }, { headers });
   } catch (error) {
     if (isHiggsfieldAuthenticationFailure(error)) {
-      await invalidateHiggsfieldAuthentication({ headers, sessionFingerprint: fingerprint });
+      await invalidateHiggsfieldAuthentication({ sessionFingerprint: fingerprint });
       return jsonNoStore(
         {
           ok: false,

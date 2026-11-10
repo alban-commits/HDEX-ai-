@@ -4,7 +4,6 @@ import { composeInfluencerProfile } from "@/lib/profile.functions";
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-request-security";
 import {
   appendOAuthSessionCookies,
-  clearAllOAuthCookies,
   requireActiveOAuthSession,
 } from "./oauth-routes.server";
 import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
@@ -22,7 +21,6 @@ export async function handleOpenAiProfile(request: Request): Promise<Response> {
   const active = await requireActiveOAuthSession(request);
   if (!active) {
     const headers = new Headers(NO_STORE_HEADERS);
-    clearAllOAuthCookies(headers);
     return jsonNoStore(
       {
         ok: false,

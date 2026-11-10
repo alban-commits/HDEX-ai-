@@ -316,6 +316,7 @@ describe("Higgsfield OAuth security contract", () => {
       { env, fetchImpl: failedRefresh, now: NOW },
     );
     expect(await reconnect.json()).toMatchObject({ connected: false, reconnectRequired: true });
+    expect(reconnect.headers.get("set-cookie")).toBeNull();
 
     const disconnected = await handleOAuthDisconnect(
       new Request(`${PUBLIC_ORIGIN}/api/higgsfield/oauth/disconnect`, {

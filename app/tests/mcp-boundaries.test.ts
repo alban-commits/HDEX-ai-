@@ -2422,7 +2422,7 @@ describe("Higgsfield MCP discovery boundary", () => {
     clearHiggsfieldRuntime(fingerprint);
   });
 
-  test("clears sealed cookies, capability cache, and generation TTL state after MCP 401/403", async () => {
+  test("clears capability cache and generation TTL state after MCP 401/403 without touching browser cookies", async () => {
     const fingerprint = "authentication-failure-session";
     await seed(fingerprint);
     await createHiggsfieldGeneration({
@@ -2445,9 +2445,7 @@ describe("Higgsfield MCP discovery boundary", () => {
     });
     const error = new HiggsfieldMcpError("authentication_failed");
     expect(isHiggsfieldAuthenticationFailure(error)).toBe(true);
-    const headers = new Headers();
     await invalidateHiggsfieldAuthentication({
-      headers,
       sessionFingerprint: fingerprint,
       env: GENERATION_ENV,
     });
@@ -2458,7 +2456,6 @@ describe("Higgsfield MCP discovery boundary", () => {
     expect(
       (await listHiggsfieldGenerations({ fingerprint, env: GENERATION_ENV, now: NOW })).items,
     ).toEqual([]);
-    expect(headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
   test("does not repopulate generation state from a create flight invalidated by reconnect", async () => {
@@ -2493,7 +2490,6 @@ describe("Higgsfield MCP discovery boundary", () => {
     });
     await entered;
     await invalidateHiggsfieldAuthentication({
-      headers: new Headers(),
       sessionFingerprint: fingerprint,
       env: GENERATION_ENV,
     });

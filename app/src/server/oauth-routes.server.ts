@@ -254,7 +254,6 @@ export async function handleOAuthStatus(
   });
   const headers = new Headers(NO_STORE_HEADERS);
   if (!status.connected) {
-    clearAllOAuthCookies(headers);
     return Response.json(
       {
         available: true,
@@ -268,7 +267,6 @@ export async function handleOAuthStatus(
   const effective = status.sessionCookies ?? original;
   const session = readHiggsfieldOAuthSession(config, effective, options.now);
   if (!session) {
-    clearAllOAuthCookies(headers);
     return Response.json(
       { available: true, connected: false, reconnectRequired: true, transport: "mcp_oauth" },
       { headers },

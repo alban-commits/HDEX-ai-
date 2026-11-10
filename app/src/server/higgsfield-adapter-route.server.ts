@@ -16,7 +16,6 @@ import {
 } from "./higgsfield-mcp.server";
 import {
   appendOAuthSessionCookies,
-  clearAllOAuthCookies,
   requireActiveOAuthSession,
   type ActiveOAuthSession,
 } from "./oauth-routes.server";
@@ -102,7 +101,6 @@ export async function handleHiggsfieldAdapter(
   try {
     const active = await (options.requireActiveOAuthSession ?? requireActiveOAuthSession)(request);
     if (!active) {
-      clearAllOAuthCookies(headers);
       return respond(
         {
           ok: false,
@@ -252,13 +250,9 @@ export async function handleHiggsfieldAdapter(
   } catch (error) {
     if (isHiggsfieldAuthenticationFailure(error)) {
       if (fingerprint) {
-        try {
-          await invalidateHiggsfieldAuthentication({ headers, sessionFingerprint: fingerprint });
-        } catch {
-          clearAllOAuthCookies(headers);
-        }
-      } else {
-        clearAllOAuthCookies(headers);
+        await invalidateHiggsfieldAuthentication({ sessionFingerprint: fingerprint }).catch(
+          () => undefined,
+        );
       }
       return respond(
         {

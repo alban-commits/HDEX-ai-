@@ -110,6 +110,7 @@ describe("Higgsfield capability JSON boundary", () => {
       reason: "oauth_required",
       reconnectRequired: true,
     });
+    expect(missing.headers.get("set-cookie")).toBeNull();
     expect(parsedLogs(missingLogs)[0]).toMatchObject({ stage: "session", status: 401 });
 
     let invalidations = 0;

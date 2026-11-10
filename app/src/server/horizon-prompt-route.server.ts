@@ -4,7 +4,7 @@ import { MAX_UPLOAD_BYTES } from "@/lib/upload-request-security";
 import { composeHorizonPrompt, type HorizonPromptImage } from "./horizon-prompt.server";
 import { jsonNoStore, NO_STORE_HEADERS, rejectCrossSiteMutation } from "./http.server";
 import { validateImageBytes } from "./image-validation.server";
-import { appendOAuthSessionCookies, clearAllOAuthCookies, requireActiveOAuthSession } from "./oauth-routes.server";
+import { appendOAuthSessionCookies, requireActiveOAuthSession } from "./oauth-routes.server";
 
 const requestData = z.object({
   brief: z.string().max(8_000),
@@ -39,7 +39,6 @@ export async function handleHorizonPrompt(
   const headers = new Headers(NO_STORE_HEADERS);
   const active = await (dependencies.requireSession ?? requireActiveOAuthSession)(request);
   if (!active) {
-    clearAllOAuthCookies(headers);
     return jsonNoStore({ ok: false, code: "oauth_required", message: "Higgsfield 계정으로 로그인한 뒤 이용해주세요." }, { status: 401, headers });
   }
   const crossSite = rejectCrossSiteMutation(request, active.config.publicOrigin);
